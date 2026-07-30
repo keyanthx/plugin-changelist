@@ -127,8 +127,10 @@ export function ItemEditor({
         onChange={(event) => onChange({ title: event.target.value })}
       />
 
-      {/* Difficulty — the setting that decides which model gets the job. */}
-      <div className="change-radio-row">
+      {/* Difficulty — the setting that decides which model gets the job. Its own
+          class so all three stay on one line; the shared .change-radio-row
+          wraps, which orphaned "Hard" onto a second row. */}
+      <div className="change-difficulty-row">
         {DIFFICULTIES.map((difficulty) => {
           const selected = item.difficulty === difficulty;
           const color = difficultyColor(difficulty, theme);

@@ -81,6 +81,8 @@ function Panel({ onClose }: { onClose: () => void }) {
   const [sending, setSending] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
   const [draft, setDraft] = useState('');
+  /** Briefly set after a send, purely to flash the row it came from. */
+  const [justSentId, setJustSentId] = useState<string | null>(null);
   /** Which agent CLIs are on the PATH, e.g. `{ claude: true, opencode: false }`. */
   const [installedClis, setInstalledClis] = useState<Record<string, boolean>>({});
   const [detectedPrefix, setDetectedPrefix] = useState('');
@@ -241,6 +243,11 @@ function Panel({ onClose }: { onClose: () => void }) {
         context.actions.focusTerminal();
         setItems((items) => updateItem(setStatus(items, item.id, 'doing'), item.id, { workBranch }));
         setSendId(null);
+
+        // Flash the row so the copy is acknowledged on screen, not only in a
+        // toast that may be looked away from.
+        setJustSentId(item.id);
+        window.setTimeout(() => setJustSentId((id) => (id === item.id ? null : id)), 700);
         // Name the destination. "Paste it in the terminal" was too vague: the
         // launch command only works at a shell prompt, and pasting it into a
         // running agent silently turns it into a chat message.
@@ -310,10 +317,18 @@ function Panel({ onClose }: { onClose: () => void }) {
         {items.map((item, index) => (
           <div
             key={item.id}
-            className="change-row"
+            className={`change-row${expandedId === item.id ? ' change-row-expanded' : ''}${
+              justSentId === item.id ? ' change-row-sent' : ''
+            }`}
             style={{
               background: theme.bgSecondary,
               border: `1px solid ${expandedId === item.id ? theme.accent : theme.border}`,
+              // An accent edge on the item currently in flight, so the eye lands
+              // on what you're working on. Inset shadow rather than a border so
+              // it doesn't fight the border above.
+              ...(item.status === 'doing'
+                ? { boxShadow: `inset 3px 0 0 ${theme.accent}` }
+                : null),
             }}
           >
             <ItemRow

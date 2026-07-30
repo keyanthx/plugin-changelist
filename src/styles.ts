@@ -12,6 +12,30 @@ export const STYLE_ID = 'change-plugin-styles';
 export const CSS = `
 @keyframes changeSpin { to { transform: rotate(360deg); } }
 @keyframes changeFadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+@keyframes changeRowIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+/* A brief acknowledgement that a send happened, on the row it came from. */
+@keyframes changeRowSent {
+  0% { background: rgba(127, 127, 127, 0.30); }
+  100% { background: transparent; }
+}
+
+/*
+ * Motion is an acknowledgement, never a requirement. Everything above is short
+ * and functional, and all of it is off for anyone who asks for less motion.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .change-frame,
+  .change-modal,
+  .change-row,
+  .change-row-sent,
+  .change-row-actions,
+  .change-dot,
+  .change-resize-handle {
+    animation: none !important;
+    transition: none !important;
+  }
+  .change-dot:hover { transform: none; }
+}
 
 /* ------------------------------------------------- main panel: window/dock */
 
@@ -142,6 +166,7 @@ export const CSS = `
  */
 .change-frame .change-capture,
 .change-frame .change-radio-row,
+.change-frame .change-difficulty-row,
 .change-frame .change-settings-row,
 .change-frame .change-editor-actions,
 .change-frame .change-row-main,
@@ -332,24 +357,31 @@ export const CSS = `
   border-radius: 7px;
   margin-bottom: 5px;
   overflow: hidden;
+  animation: changeRowIn 0.16s ease-out;
+  transition: opacity 0.14s ease-out, background 0.14s ease-out;
 }
 
 .change-row-main {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   padding: 8px 9px;
 }
 
+/* The title is the row. Basis 0 so it absorbs all free space, and everything
+   beside it is capped so it can never be squeezed to "Rework the …" again. */
 .change-row-title {
-  flex: 1;
+  /* Content width, shrinking with an ellipsis when there isn't room — the
+     spacer beside it takes the slack, so the "no prompt" marker stays next to
+     the title rather than drifting to the far edge. */
+  flex: 0 1 auto;
   min-width: 0;
   cursor: pointer;
   text-align: left;
   background: none;
   border: none;
   font: inherit;
-  font-size: 12.5px;
+  font-size: 13px;
   padding: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -357,19 +389,53 @@ export const CSS = `
 }
 .change-row-title.change-done { text-decoration: line-through; opacity: 0.55; }
 
-.change-row-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.change-row-spacer { flex: 1 1 0; min-width: 0; }
 
+/* "No prompt yet" — quiet, but present, because sending without one hands the
+   agent nothing but the title. */
+.change-no-prompt {
+  flex: none;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.55;
+  letter-spacing: 0.06em;
+}
+
+/*
+ * Actions appear on hover or keyboard focus. Opacity rather than display, so
+ * they stay in the tab order and reachable by screen readers — four rows
+ * showing eight buttons at rest was most of the row's visual noise.
+ */
+.change-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  opacity: 0;
+  transition: opacity 0.14s ease-out;
+}
+.change-row:hover .change-row-actions,
+.change-row:focus-within .change-row-actions,
+.change-row-expanded .change-row-actions {
+  opacity: 1;
+}
+
+/* One indicator: colour is the difficulty, filled means started. */
 .change-dot {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   flex: none;
   border: 1.5px solid currentColor;
   background: none;
   padding: 0;
   cursor: pointer;
+  transition: background 0.14s ease-out, transform 0.14s ease-out;
 }
 .change-dot-filled { background: currentColor; }
+.change-dot:hover { transform: scale(1.25); }
+
+.change-row-sent { animation: changeRowSent 0.7s ease-out; }
 
 .change-chip {
   font-size: 9.5px;
@@ -384,15 +450,13 @@ export const CSS = `
   line-height: 1.4;
 }
 
-.change-branch-tag {
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 4px;
+/* The branch signal: an icon costing ~11px, with the name in its tooltip. As
+   text this was 92px of a 248px row and left the title truncated. */
+.change-branch-mark {
   flex: none;
-  max-width: 130px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.75;
 }
 
 .change-empty {
@@ -496,6 +560,24 @@ export const CSS = `
 /* Wraps rather than squeezing: two preset buttons don't fit side by side in a
    narrow dock, and stacking them reads far better than compressing both. */
 .change-radio-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/*
+ * The three difficulty buttons, which must stay on one line.
+ *
+ * They previously used .change-radio-row, whose 120px flex-basis meant three of
+ * them plus gaps exceeded the panel and wrapped 2 + 1 — "Easy | Normal" with
+ * "Hard" orphaned below, which reads as broken. Basis 0 lets all three share
+ * whatever width there is.
+ */
+.change-difficulty-row { display: flex; gap: 6px; flex-wrap: nowrap; min-width: 0; }
+.change-difficulty-row .change-radio {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .change-radio {
   flex: 1 1 120px;

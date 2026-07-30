@@ -267,6 +267,30 @@ export function removeItem(items: ChangeItem[], id: string): ChangeItem[] {
   return items.filter((item) => item.id !== id);
 }
 
+/** The branch an item belongs to: where it's worked, else where it was noted. */
+export function branchForItem(
+  item: Pick<ChangeItem, 'workBranch' | 'branchAtCapture'>
+): string | null {
+  return item.workBranch ?? item.branchAtCapture;
+}
+
+/**
+ * Should a row show its branch tag?
+ *
+ * Only when it says something you don't already know — that this note belongs
+ * somewhere other than where you're standing. This is load-bearing rather than
+ * cosmetic: the tag sits beside the title and competes with it for width, and
+ * an earlier version let it truncate an in-progress row down to "Rework the …".
+ * Every tag shown without earning it costs title.
+ */
+export function shouldShowBranch(
+  branch: string | null | undefined,
+  currentBranch: string | null
+): boolean {
+  if (!branch) return false;
+  return branch !== currentBranch;
+}
+
 /** The three rendered groups, each keeping the user's manual order. */
 export function groupItems(items: ChangeItem[]) {
   return {
