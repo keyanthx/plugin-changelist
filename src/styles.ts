@@ -29,6 +29,8 @@ export const CSS = `
   .change-row,
   .change-row-sent,
   .change-row-actions,
+  .change-row-open,
+  .change-row-chevron,
   .change-template-x,
   .change-dot,
   .change-resize-handle {
@@ -171,6 +173,7 @@ export const CSS = `
 .change-frame .change-settings-row,
 .change-frame .change-editor-actions,
 .change-frame .change-row-main,
+.change-frame .change-row-open,
 .change-frame .change-picker-row,
 .change-frame .change-button-row,
 .change-frame .change-tag-head,
@@ -376,26 +379,52 @@ export const CSS = `
   padding: 8px 9px;
 }
 
-/* The title is the row. Basis 0 so it absorbs all free space, and everything
-   beside it is capped so it can never be squeezed to "Rework the …" again. */
-.change-row-title {
-  /* Content width, shrinking with an ellipsis when there isn't room — the
-     spacer beside it takes the slack, so the "no prompt" marker stays next to
-     the title rather than drifting to the far edge. */
-  flex: 0 1 auto;
+/*
+ * The open/collapse target: the title, its markers, and all the slack after
+ * them. It takes every pixel not claimed by the dot, the branch mark and the
+ * actions, so hitting it doesn't depend on how long the title happens to be.
+ */
+.change-row-open {
+  flex: 1 1 0;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
   text-align: left;
   background: none;
   border: none;
   font: inherit;
   font-size: 13px;
-  padding: 0;
+  /* Vertical padding grows the target without making the row taller, since the
+     dot and the buttons beside it are taller than the text anyway. */
+  padding: 4px 4px;
+  margin: -4px -4px;
+  border-radius: 5px;
+  transition: background 0.12s ease-out;
+}
+.change-row-open:hover { background: rgba(127, 127, 127, 0.10); }
+
+/* Content width, shrinking with an ellipsis when there isn't room, so the
+   markers beside it stay next to the title rather than drifting right. */
+.change-row-title {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .change-row-title.change-done { text-decoration: line-through; opacity: 0.55; }
+
+/* The hint that there's something to open. Quiet at rest, clearer on hover. */
+.change-row-chevron {
+  flex: none;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.7;
+  transition: opacity 0.12s ease-out;
+}
+.change-row-open:hover .change-row-chevron { opacity: 1; }
 
 .change-row-spacer { flex: 1 1 0; min-width: 0; }
 

@@ -111,30 +111,43 @@ export function ItemRow({
         onClick={onToggleDone}
       />
 
+      {/*
+       * The whole middle of the row is one button, including the slack after
+       * the title — with the title sized to its text the target was only as
+       * wide as the words, so short titles were fiddly to hit. The chevron is
+       * the hint that there's something to open.
+       */}
       <button
-        className={`change-row-title${isDone ? ' change-done' : ''}`}
+        className="change-row-open"
         style={{ color: theme.textPrimary }}
         title={expanded ? 'Collapse' : 'Open'}
+        aria-expanded={expanded}
         onClick={onToggleExpand}
       >
-        {item.title || <span style={{ color: theme.textMuted }}>Untitled change</span>}
-      </button>
-
-      {missingPrompt && !isDone ? (
-        <span
-          className="change-no-prompt"
-          style={{ color: theme.textMuted }}
-          title="No prompt yet — sending would hand over just the title"
-          aria-label="No prompt yet"
-        >
-          {/* A hollow speech mark: quiet, and legible at 11px. */}
-          &#8230;
+        <span className={`change-row-title${isDone ? ' change-done' : ''}`}>
+          {item.title || <span style={{ color: theme.textMuted }}>Untitled change</span>}
         </span>
-      ) : null}
 
-      {/* Takes the slack, so the marker above stays next to the title while the
-          branch mark and actions stay pinned right. */}
-      <span className="change-row-spacer" />
+        {missingPrompt && !isDone ? (
+          <span
+            className="change-no-prompt"
+            style={{ color: theme.textMuted }}
+            title="No prompt yet — sending would hand over just the title"
+            aria-label="No prompt yet"
+          >
+            {/* A hollow speech mark: quiet, and legible at 11px. */}
+            &#8230;
+          </span>
+        ) : null}
+
+        <span className="change-row-chevron" style={{ color: theme.textMuted }} aria-hidden="true">
+          {expanded ? '▾' : '▸'}
+        </span>
+
+        {/* Takes the slack — inside the button, so the empty space is clickable
+            too rather than being dead area in the middle of the row. */}
+        <span className="change-row-spacer" />
+      </button>
 
       {showBranch ? (
         /*
