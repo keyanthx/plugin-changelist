@@ -922,9 +922,9 @@ const CSS = `
   background: none;
   border: none;
   cursor: pointer;
-  padding: 4px 6px;
+  padding: 5px 7px;
   border-radius: 5px;
-  font-size: 11px;
+  font-size: 15px;
   line-height: 1;
   font-family: inherit;
   display: inline-flex;
