@@ -1,0 +1,14 @@
+{
+  "id": "changelist",
+  "name": "Change List",
+  "version": "0.1.0",
+  "description": "A per-project list of changes with their prompts — write them down as you notice them, then send each one to your agent on the model you picked.",
+  "slots": ["toolbar", "publish"],
+  "author": "Keyan Thanner",
+  "repository": "https://github.com/keyanthx/plugin-changelist",
+  "setup": [],
+  "min_app_version": "0.18.0",
+  "icon": "",
+  "required_commands": ["get_branch_prefix_preference"],
+  "api_version": 1
+}

@@ -1,0 +1,6 @@
+node_modules/
+.DS_Store
+*.log
+
+# dist/ is intentionally NOT ignored — Ship Studio installs plugins without a
+# build step, so dist/index.js has to be committed.
