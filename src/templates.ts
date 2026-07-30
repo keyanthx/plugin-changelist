@@ -1,22 +1,38 @@
 /**
- * Prompt skeletons.
+ * Prompt templates as *fields to fill in*, not text to paste.
  *
- * Most of "writing a better prompt" isn't wording — it's remembering to say
- * *where* the change goes and *what done looks like*. A skeleton that already
- * asks those questions gets you there faster than any amount of advice.
+ * The earlier version pasted a skeleton full of `<angle bracket>` blanks into
+ * the prompt box and left you to overwrite each one. That put the work of
+ * editing around placeholders on you, and half-edited skeletons went out with
+ * `<which page?>` still in them.
  *
- * Each skeleton is a set of labelled lines with angle-bracket blanks. The
- * blanks are deliberately obvious so an unfilled one is easy to spot before
- * sending — and so the agent can tell you missed it.
+ * Now each template is a small set of labelled boxes. Fill what you know, leave
+ * the rest blank, and `composePrompt` assembles the result — no AI involved,
+ * just string joining. An empty box contributes nothing at all.
  */
 import type { TemplateId } from './model.ts';
+
+export interface TemplateField {
+  /**
+   * Stable key the value is stored under.
+   *
+   * Shared deliberately across templates — `where` means the same thing in a
+   * bug report and a restyle — so switching template keeps what still applies
+   * instead of making you retype it.
+   */
+  id: string;
+  /** Shown above the box, and used as the label in the composed prompt. */
+  label: string;
+  placeholder: string;
+  multiline?: boolean;
+}
 
 export interface Template {
   id: TemplateId;
   label: string;
-  /** One line explaining when to reach for it, shown under the picker. */
+  /** One line explaining when to reach for it, shown as the chip's tooltip. */
   hint: string;
-  skeleton: string;
+  fields: TemplateField[];
 }
 
 export const TEMPLATES: Template[] = [
@@ -24,57 +40,67 @@ export const TEMPLATES: Template[] = [
     id: 'style',
     label: 'Style',
     hint: 'Spacing, colour, size, weight — how something looks.',
-    skeleton: [
-      'Restyle <element> in <section> on <page>.',
-      'Now: <how it looks today>',
-      'Should be: <the look you want — spacing, size, colour, weight>',
-      'Keep: <what must not change — layout, other pages, the design tokens>',
-    ].join('\n'),
+    fields: [
+      { id: 'what', label: 'What', placeholder: 'the hero headline' },
+      { id: 'where', label: 'Where', placeholder: 'home page, or src/components/Hero.tsx' },
+      { id: 'now', label: 'Now', placeholder: 'how it looks today' },
+      { id: 'should', label: 'Should be', placeholder: 'the size, spacing or colour you want' },
+      { id: 'keep', label: 'Keep', placeholder: "what mustn't change" },
+    ],
   },
   {
     id: 'copy',
     label: 'Copy',
     hint: 'Wording — headlines, body text, button labels.',
-    skeleton: [
-      'Rewrite the <headline / paragraph / button label> in <section> on <page>.',
-      'Current text: "<paste it here>"',
-      'It should say: <the message, and the tone>',
-      'Keep: <length limit, words to keep, words to avoid>',
-    ].join('\n'),
+    fields: [
+      { id: 'what', label: 'What', placeholder: 'the headline, a button label' },
+      { id: 'where', label: 'Where', placeholder: 'home page, hero section' },
+      { id: 'current', label: 'Current text', placeholder: 'paste it here', multiline: true },
+      { id: 'should', label: 'Should say', placeholder: 'the message, and the tone' },
+      { id: 'keep', label: 'Keep', placeholder: 'length limit, words to avoid' },
+    ],
   },
   {
     id: 'bug',
     label: 'Bug',
     hint: 'Something is broken and you can describe how to see it.',
-    skeleton: [
-      'Bug: <what goes wrong>',
-      'Where: <page, component, or file>',
-      'Steps: <what I do to see it happen>',
-      'Expected: <what should happen instead>',
-      'Only on: <browser or screen size, if it is not everywhere>',
-    ].join('\n'),
+    fields: [
+      /*
+       * `symptom`, not the shared `what`, on purpose. Elsewhere `what` names a
+       * thing ("the hero headline"); here it describes a behaviour ("submits
+       * twice"). Sharing the key would carry a noun into "What goes wrong" and
+       * read as nonsense. `where` genuinely does mean the same thing, so it
+       * stays shared.
+       */
+      { id: 'symptom', label: 'What goes wrong', placeholder: 'the form submits twice' },
+      { id: 'where', label: 'Where', placeholder: 'contact page, or the file' },
+      { id: 'steps', label: 'Steps', placeholder: 'what you do to see it happen', multiline: true },
+      { id: 'expected', label: 'Expected', placeholder: 'what should happen instead' },
+      { id: 'only', label: 'Only on', placeholder: 'a browser or screen size, if not everywhere' },
+    ],
   },
   {
     id: 'new-section',
     label: 'New section',
     hint: 'Adding something that is not on the page yet.',
-    skeleton: [
-      'Add a <section type> section to <page>, <above / below> the <existing section>.',
-      'Content: <headline, text, images, links it should hold>',
-      'Behaviour: <responsive rules, animation, where links go>',
-      'Match: <the existing section it should look consistent with>',
-    ].join('\n'),
+    fields: [
+      { id: 'what', label: 'What to add', placeholder: 'a testimonials section' },
+      { id: 'where', label: 'Where', placeholder: 'home page, below the hero' },
+      { id: 'content', label: 'Content', placeholder: 'headline, text, images, links', multiline: true },
+      { id: 'behaviour', label: 'Behaviour', placeholder: 'responsive rules, animation, where links go' },
+      { id: 'match', label: 'Match', placeholder: 'the existing section it should sit alongside' },
+    ],
   },
   {
     id: 'refactor',
     label: 'Refactor',
     hint: 'Tidying code without changing what the visitor sees.',
-    skeleton: [
-      'Refactor <file or component>.',
-      'Goal: <what should be easier afterwards>',
-      'Keep identical: <the rendered output, the props it takes>',
-      "Don't: <rename things, change behaviour, touch other files>",
-    ].join('\n'),
+    fields: [
+      { id: 'what', label: 'What', placeholder: 'the file or component' },
+      { id: 'goal', label: 'Goal', placeholder: 'what should be easier afterwards' },
+      { id: 'keep', label: 'Keep identical', placeholder: 'the rendered output, the props it takes' },
+      { id: 'avoid', label: "Don't", placeholder: 'rename things, touch other files' },
+    ],
   },
 ];
 
@@ -84,13 +110,42 @@ export function findTemplate(id: TemplateId | null): Template | null {
 }
 
 /**
- * The skeleton with the title already dropped into the first blank.
+ * Build the prompt from whatever's filled in.
  *
- * A small touch, but it means the very first thing you see is your own note
- * rather than a row of placeholders.
+ * Deliberately dumb and predictable — labelled lines, empty boxes skipped,
+ * free-text notes appended as their own paragraph. No AI, so what you see in
+ * the preview is exactly what gets sent, every time.
+ *
+ * With no template and no fields this returns the notes verbatim, which is why
+ * writing a prompt freehand still works exactly as it did.
  */
-export function fillSkeleton(template: Template, title: string): string {
-  const trimmed = title.trim();
-  if (!trimmed) return template.skeleton;
-  return template.skeleton.replace(/<[^>]+>/, trimmed);
+export function composePrompt(
+  template: Template | null,
+  fields: Record<string, string>,
+  notes: string
+): string {
+  const lines: string[] = [];
+
+  if (template) {
+    for (const field of template.fields) {
+      const value = (fields[field.id] ?? '').trim();
+      if (!value) continue; // a blank box says nothing, so it contributes nothing
+      // Multi-line values sit under their label so they keep their shape.
+      lines.push(value.includes('\n') ? `${field.label}:\n${value}` : `${field.label}: ${value}`);
+    }
+  }
+
+  const trailing = notes.trim();
+  if (!lines.length) return trailing;
+  if (!trailing) return lines.join('\n');
+  return `${lines.join('\n')}\n\n${trailing}`;
+}
+
+/** Does this template have anything filled in? Used to warn before discarding. */
+export function hasAnyFieldValue(
+  template: Template | null,
+  fields: Record<string, string>
+): boolean {
+  if (!template) return false;
+  return template.fields.some((field) => (fields[field.id] ?? '').trim().length > 0);
 }

@@ -23,8 +23,24 @@ export interface ChangeItem {
   id: string;
   /** The one-line note, captured fast. */
   title: string;
-  /** The full instruction handed to the agent. Often written later. */
+  /**
+   * The full instruction handed to the agent.
+   *
+   * Derived, not typed directly: `composePrompt` builds it from `fields` and
+   * `notes` whenever either changes. Everything downstream — sending, linting,
+   * ✨ Improve — reads this one field and doesn't care how it was assembled.
+   */
   prompt: string;
+  /**
+   * Values for the template's boxes, keyed by field id.
+   *
+   * Keys are shared across templates on purpose (`where` means the same thing
+   * everywhere), so switching template keeps what still applies.
+   */
+  fields: Record<string, string>;
+  /** Free text, appended after the template's lines. The whole prompt when no
+   *  template is chosen. */
+  notes: string;
   difficulty: Difficulty;
   status: Status;
   template: TemplateId | null;
@@ -124,6 +140,15 @@ function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
+/** Keep only the string entries; a malformed value shouldn't poison the form. */
+function readFields(raw: Record<string, unknown>): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === 'string') fields[key] = value;
+  }
+  return fields;
+}
+
 /**
  * Coerce one stored entry into a valid item, or drop it.
  *
@@ -139,10 +164,22 @@ function readItem(value: unknown): ChangeItem | null {
   const difficulty = value.difficulty as Difficulty;
   const status = value.status as Status;
 
+  const prompt = asString(value.prompt);
+  const fields = isRecord(value.fields) ? readFields(value.fields) : {};
+  /*
+   * Items written before templates became fields have a `prompt` and nothing
+   * else. Treating that text as free-form notes preserves it exactly: with no
+   * field values, `composePrompt` returns the notes verbatim, so an old item
+   * reads back byte-for-byte the same.
+   */
+  const notes = typeof value.notes === 'string' ? value.notes : prompt;
+
   return {
     id,
     title: asString(value.title),
-    prompt: asString(value.prompt),
+    prompt,
+    fields,
+    notes,
     difficulty: DIFFICULTIES.includes(difficulty) ? difficulty : 'normal',
     status: STATUSES.includes(status) ? status : 'todo',
     template: asString(value.template) ? (value.template as TemplateId) : null,
@@ -202,6 +239,8 @@ export function createItem(title: string, branchAtCapture: string | null): Chang
     id: newId(),
     title: title.trim(),
     prompt: '',
+    fields: {},
+    notes: '',
     difficulty: 'normal',
     status: 'todo',
     template: null,

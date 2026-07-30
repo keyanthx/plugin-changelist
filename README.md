@@ -21,9 +21,15 @@ Each note quietly records the git branch you were on when you wrote it.
 
 **Write the prompt.** Open an item and you get three kinds of help:
 
-- **Templates** — Style, Copy, Bug, New section, Refactor. Each prefills a
-  skeleton that already asks *where* the change goes and *what done looks like*,
-  which is most of what a rushed prompt leaves out.
+- **Templates** — Style, Copy, Bug, New section, Refactor. Each gives you a few
+  labelled boxes to fill: *what*, *where*, *what done looks like*, *what not to
+  touch*. **Leave any of them blank** — an empty box contributes nothing. The
+  prompt is assembled from what you filled in, by plain string joining, so what
+  the preview shows is exactly what gets sent. Click the active template again
+  to go back to writing freehand.
+
+  Switching template keeps values that still apply — `where` means the same
+  thing in a bug report and a restyle — and never touches your free text.
 - **Live hints** under the box: unfilled blanks, no page or file named, no
   desired outcome, vague words like "nicer". Informational only, never blocking.
 - **✨ Improve** — sends the note to an agent CLI already on your machine and

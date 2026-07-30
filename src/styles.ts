@@ -178,6 +178,8 @@ export const CSS = `
 }
 
 .change-frame .change-settings,
+.change-frame .change-fields,
+.change-frame .change-field,
 .change-frame .change-editor,
 .change-frame .change-popover-body,
 .change-frame .change-settings-grid {
@@ -480,6 +482,23 @@ export const CSS = `
   font-family: inherit;
   background: none;
 }
+
+/* The template's boxes. One column, tight, so five of them still read as one
+   form rather than five separate controls. */
+.change-fields { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+.change-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.change-field-name {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+/* Shorter than the free-text box: these hold a phrase, not a paragraph. */
+.change-field-box { padding: 6px 8px; }
+.change-field-multiline { min-height: 52px; resize: vertical; line-height: 1.5; }
 
 .change-nudges { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; }
 .change-nudge { display: inline-flex; align-items: center; gap: 4px; }

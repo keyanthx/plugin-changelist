@@ -119,6 +119,48 @@ test('customised commands survive, missing ones fall back per field', () => {
 
 // ------------------------------------------------------------- operations
 
+test('an item written before templates became fields keeps its prompt', () => {
+  // Old items have a prompt and nothing else. Reading that text back as free
+  // text means composePrompt returns it verbatim, so nothing is lost or
+  // reformatted by the upgrade.
+  const old = {
+    schema: 1,
+    items: [{ id: 'a', title: 'Fix hero', prompt: 'Restyle <element> on the home page.', template: 'style' }],
+    settings: {},
+  };
+  const [restored] = readStored(old).items;
+  assert.equal(restored.prompt, 'Restyle <element> on the home page.');
+  assert.equal(restored.notes, 'Restyle <element> on the home page.');
+  assert.deepEqual(restored.fields, {});
+});
+
+test('a stored item with fields reads them back', () => {
+  const stored = {
+    schema: 1,
+    items: [{ id: 'a', title: 't', prompt: 'What: x', notes: '', fields: { what: 'x' } }],
+    settings: {},
+  };
+  const [restored] = readStored(stored).items;
+  assert.deepEqual(restored.fields, { what: 'x' });
+  assert.equal(restored.notes, '');
+});
+
+test('non-string field values are dropped rather than breaking the form', () => {
+  const stored = {
+    schema: 1,
+    items: [{ id: 'a', title: 't', prompt: '', fields: { what: 'x', broken: 42, alsoBad: null } }],
+    settings: {},
+  };
+  assert.deepEqual(readStored(stored).items[0].fields, { what: 'x' });
+});
+
+test('a new item starts with empty fields and notes', () => {
+  const created = createItem('something', null);
+  assert.deepEqual(created.fields, {});
+  assert.equal(created.notes, '');
+  assert.equal(created.prompt, '');
+});
+
 test('status changes stamp the matching timestamp', () => {
   const items = [item('a')];
   const doing = setStatus(items, 'a', 'doing');

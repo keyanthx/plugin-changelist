@@ -263,16 +263,28 @@ function isRecord(value) {
 function asString(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
+function readFields(raw) {
+  const fields = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "string") fields[key] = value;
+  }
+  return fields;
+}
 function readItem(value) {
   if (!isRecord(value)) return null;
   const id = asString(value.id);
   if (!id) return null;
   const difficulty = value.difficulty;
   const status = value.status;
+  const prompt = asString(value.prompt);
+  const fields = isRecord(value.fields) ? readFields(value.fields) : {};
+  const notes = typeof value.notes === "string" ? value.notes : prompt;
   return {
     id,
     title: asString(value.title),
-    prompt: asString(value.prompt),
+    prompt,
+    fields,
+    notes,
     difficulty: DIFFICULTIES$2.includes(difficulty) ? difficulty : "normal",
     status: STATUSES.includes(status) ? status : "todo",
     template: asString(value.template) ? value.template : null,
@@ -315,6 +327,8 @@ function createItem(title, branchAtCapture) {
     id: newId(),
     title: title.trim(),
     prompt: "",
+    fields: {},
+    notes: "",
     difficulty: "normal",
     status: "todo",
     template: null,
@@ -848,6 +862,8 @@ const CSS = `
 }
 
 .change-frame .change-settings,
+.change-frame .change-fields,
+.change-frame .change-field,
 .change-frame .change-editor,
 .change-frame .change-popover-body,
 .change-frame .change-settings-grid {
@@ -1150,6 +1166,23 @@ const CSS = `
   font-family: inherit;
   background: none;
 }
+
+/* The template's boxes. One column, tight, so five of them still read as one
+   form rather than five separate controls. */
+.change-fields { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+.change-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.change-field-name {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+/* Shorter than the free-text box: these hold a phrase, not a paragraph. */
+.change-field-box { padding: 6px 8px; }
+.change-field-multiline { min-height: 52px; resize: vertical; line-height: 1.5; }
 
 .change-nudges { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; }
 .change-nudge { display: inline-flex; align-items: center; gap: 4px; }
@@ -1513,63 +1546,89 @@ const TEMPLATES = [
     id: "style",
     label: "Style",
     hint: "Spacing, colour, size, weight — how something looks.",
-    skeleton: [
-      "Restyle <element> in <section> on <page>.",
-      "Now: <how it looks today>",
-      "Should be: <the look you want — spacing, size, colour, weight>",
-      "Keep: <what must not change — layout, other pages, the design tokens>"
-    ].join("\n")
+    fields: [
+      { id: "what", label: "What", placeholder: "the hero headline" },
+      { id: "where", label: "Where", placeholder: "home page, or src/components/Hero.tsx" },
+      { id: "now", label: "Now", placeholder: "how it looks today" },
+      { id: "should", label: "Should be", placeholder: "the size, spacing or colour you want" },
+      { id: "keep", label: "Keep", placeholder: "what mustn't change" }
+    ]
   },
   {
     id: "copy",
     label: "Copy",
     hint: "Wording — headlines, body text, button labels.",
-    skeleton: [
-      "Rewrite the <headline / paragraph / button label> in <section> on <page>.",
-      'Current text: "<paste it here>"',
-      "It should say: <the message, and the tone>",
-      "Keep: <length limit, words to keep, words to avoid>"
-    ].join("\n")
+    fields: [
+      { id: "what", label: "What", placeholder: "the headline, a button label" },
+      { id: "where", label: "Where", placeholder: "home page, hero section" },
+      { id: "current", label: "Current text", placeholder: "paste it here", multiline: true },
+      { id: "should", label: "Should say", placeholder: "the message, and the tone" },
+      { id: "keep", label: "Keep", placeholder: "length limit, words to avoid" }
+    ]
   },
   {
     id: "bug",
     label: "Bug",
     hint: "Something is broken and you can describe how to see it.",
-    skeleton: [
-      "Bug: <what goes wrong>",
-      "Where: <page, component, or file>",
-      "Steps: <what I do to see it happen>",
-      "Expected: <what should happen instead>",
-      "Only on: <browser or screen size, if it is not everywhere>"
-    ].join("\n")
+    fields: [
+      /*
+       * `symptom`, not the shared `what`, on purpose. Elsewhere `what` names a
+       * thing ("the hero headline"); here it describes a behaviour ("submits
+       * twice"). Sharing the key would carry a noun into "What goes wrong" and
+       * read as nonsense. `where` genuinely does mean the same thing, so it
+       * stays shared.
+       */
+      { id: "symptom", label: "What goes wrong", placeholder: "the form submits twice" },
+      { id: "where", label: "Where", placeholder: "contact page, or the file" },
+      { id: "steps", label: "Steps", placeholder: "what you do to see it happen", multiline: true },
+      { id: "expected", label: "Expected", placeholder: "what should happen instead" },
+      { id: "only", label: "Only on", placeholder: "a browser or screen size, if not everywhere" }
+    ]
   },
   {
     id: "new-section",
     label: "New section",
     hint: "Adding something that is not on the page yet.",
-    skeleton: [
-      "Add a <section type> section to <page>, <above / below> the <existing section>.",
-      "Content: <headline, text, images, links it should hold>",
-      "Behaviour: <responsive rules, animation, where links go>",
-      "Match: <the existing section it should look consistent with>"
-    ].join("\n")
+    fields: [
+      { id: "what", label: "What to add", placeholder: "a testimonials section" },
+      { id: "where", label: "Where", placeholder: "home page, below the hero" },
+      { id: "content", label: "Content", placeholder: "headline, text, images, links", multiline: true },
+      { id: "behaviour", label: "Behaviour", placeholder: "responsive rules, animation, where links go" },
+      { id: "match", label: "Match", placeholder: "the existing section it should sit alongside" }
+    ]
   },
   {
     id: "refactor",
     label: "Refactor",
     hint: "Tidying code without changing what the visitor sees.",
-    skeleton: [
-      "Refactor <file or component>.",
-      "Goal: <what should be easier afterwards>",
-      "Keep identical: <the rendered output, the props it takes>",
-      "Don't: <rename things, change behaviour, touch other files>"
-    ].join("\n")
+    fields: [
+      { id: "what", label: "What", placeholder: "the file or component" },
+      { id: "goal", label: "Goal", placeholder: "what should be easier afterwards" },
+      { id: "keep", label: "Keep identical", placeholder: "the rendered output, the props it takes" },
+      { id: "avoid", label: "Don't", placeholder: "rename things, touch other files" }
+    ]
   }
 ];
-function fillSkeleton(template, title) {
-  const trimmed = title.trim();
-  if (!trimmed) return template.skeleton;
-  return template.skeleton.replace(/<[^>]+>/, trimmed);
+function findTemplate(id) {
+  if (!id) return null;
+  return TEMPLATES.find((template) => template.id === id) ?? null;
+}
+function composePrompt(template, fields, notes) {
+  const lines = [];
+  if (template) {
+    for (const field of template.fields) {
+      const value = (fields[field.id] ?? "").trim();
+      if (!value) continue;
+      lines.push(value.includes("\n") ? `${field.label}:
+${value}` : `${field.label}: ${value}`);
+    }
+  }
+  const trailing = notes.trim();
+  if (!lines.length) return trailing;
+  if (!trailing) return lines.join("\n");
+  return `${lines.join("\n")}
+
+${trailing}`;
 }
 const ShipReact$5 = window.__SHIPSTUDIO_REACT__;
 function Modal({
@@ -1909,25 +1968,37 @@ function ItemEditor({
   onDelete
 }) {
   const theme = useTheme();
-  const [pendingTemplate, setPendingTemplate] = useState(null);
+  const boxStyle = {
+    background: theme.bgPrimary,
+    color: theme.textPrimary,
+    border: `1px solid ${theme.border}`
+  };
   const [improving, setImproving] = useState(false);
   const [suggestion, setSuggestion] = useState(null);
   const [error, setError] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showPrompt, setShowPrompt] = useState(false);
   const nudges = lintPrompt(item.prompt);
-  const applyTemplate = useCallback(
-    (template) => {
-      onChange({ prompt: fillSkeleton(template, item.title), template: template.id });
-      setPendingTemplate(null);
+  const template = findTemplate(item.template);
+  const applyEdit = useCallback(
+    (patch) => {
+      const nextTemplateId = patch.template !== void 0 ? patch.template : item.template;
+      const nextFields = patch.fields ?? item.fields;
+      const nextNotes = patch.notes ?? item.notes;
+      onChange({
+        ...patch,
+        prompt: composePrompt(findTemplate(nextTemplateId), nextFields, nextNotes)
+      });
     },
-    [item.title, onChange]
+    [item.fields, item.notes, item.template, onChange]
+  );
+  const setField = useCallback(
+    (id, value) => applyEdit({ fields: { ...item.fields, [id]: value } }),
+    [applyEdit, item.fields]
   );
   const pickTemplate = useCallback(
-    (template) => {
-      if (item.prompt.trim()) setPendingTemplate(template);
-      else applyTemplate(template);
-    },
-    [applyTemplate, item.prompt]
+    (next) => applyEdit({ template: item.template === next.id ? null : next.id }),
+    [applyEdit, item.template]
   );
   const cli = findAgentCli(improveCli);
   const improve = useCallback(async () => {
@@ -1953,6 +2024,9 @@ function ItemEditor({
     if (!suggestion) return;
     onChange({
       prompt: suggestion.prompt,
+      notes: suggestion.prompt,
+      template: null,
+      fields: {},
       difficulty: suggestion.difficulty,
       ...suggestion.title ? { title: suggestion.title } : {}
     });
@@ -1990,63 +2064,74 @@ function ItemEditor({
       },
       DIFFICULTY_LABELS[difficulty]
     );
-  })), /* @__PURE__ */ ShipReact$3.createElement("div", null, /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-templates" }, TEMPLATES.map((template) => /* @__PURE__ */ ShipReact$3.createElement(
+  })), /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-templates" }, TEMPLATES.map((entry) => /* @__PURE__ */ ShipReact$3.createElement(
     "button",
     {
-      key: template.id,
+      key: entry.id,
       className: "change-template-btn",
       style: {
-        border: `1px solid ${item.template === template.id ? theme.accent : theme.border}`,
-        color: item.template === template.id ? theme.accent : theme.textSecondary
+        border: `1px solid ${item.template === entry.id ? theme.accent : theme.border}`,
+        color: item.template === entry.id ? theme.accent : theme.textSecondary
       },
-      title: template.hint,
-      onClick: () => pickTemplate(template)
+      title: entry.hint,
+      "aria-pressed": item.template === entry.id,
+      onClick: () => pickTemplate(entry)
     },
-    template.label
-  ))), pendingTemplate ? /* @__PURE__ */ ShipReact$3.createElement(
-    "div",
+    entry.label
+  ))), template ? /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-fields" }, template.fields.map((field) => /* @__PURE__ */ ShipReact$3.createElement("label", { className: "change-field", key: field.id }, /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-field-name", style: { color: theme.textMuted } }, field.label), field.multiline ? /* @__PURE__ */ ShipReact$3.createElement(
+    "textarea",
     {
-      className: "change-warning change-button-row",
-      style: {
-        background: "rgba(127, 127, 127, 0.12)",
-        color: theme.textSecondary,
-        marginTop: 8
-      }
-    },
-    /* @__PURE__ */ ShipReact$3.createElement("span", { style: { flex: "1 1 140px", minWidth: 0 } }, "Replace what you’ve written with the ", pendingTemplate.label, " template?"),
-    /* @__PURE__ */ ShipReact$3.createElement(
-      "button",
-      {
-        className: "change-btn",
-        style: { background: theme.action, color: theme.actionText },
-        onClick: () => applyTemplate(pendingTemplate)
-      },
-      "Replace"
-    ),
-    /* @__PURE__ */ ShipReact$3.createElement(
-      "button",
-      {
-        className: "change-btn",
-        style: { background: "transparent", color: theme.textMuted, border: `1px solid ${theme.border}` },
-        onClick: () => setPendingTemplate(null)
-      },
-      "Cancel"
-    )
-  ) : null), /* @__PURE__ */ ShipReact$3.createElement(
+      className: "change-input change-field-box change-field-multiline",
+      style: boxStyle,
+      value: item.fields[field.id] ?? "",
+      placeholder: field.placeholder,
+      spellCheck: false,
+      onChange: (event) => setField(field.id, event.target.value)
+    }
+  ) : /* @__PURE__ */ ShipReact$3.createElement(
+    "input",
+    {
+      className: "change-input change-field-box",
+      style: boxStyle,
+      value: item.fields[field.id] ?? "",
+      placeholder: field.placeholder,
+      spellCheck: false,
+      onChange: (event) => setField(field.id, event.target.value)
+    }
+  )))) : null, /* @__PURE__ */ ShipReact$3.createElement("label", { className: "change-field" }, template ? /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-field-name", style: { color: theme.textMuted } }, "Anything else") : null, /* @__PURE__ */ ShipReact$3.createElement(
     "textarea",
     {
       className: "change-textarea",
-      style: {
-        background: theme.bgPrimary,
-        color: theme.textPrimary,
-        border: `1px solid ${theme.border}`
-      },
-      value: item.prompt,
-      placeholder: "The instruction you'll hand to your agent. Pick a template above to start from a skeleton.",
+      style: boxStyle,
+      value: item.notes,
+      placeholder: template ? "Optional — anything the boxes above don’t cover" : "The instruction you'll hand to your agent. Or pick a template above to fill in boxes instead.",
       spellCheck: false,
-      onChange: (event) => onChange({ prompt: event.target.value })
+      onChange: (event) => applyEdit({ notes: event.target.value })
     }
-  ), nudges.length > 0 ? /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-nudges", style: { color: theme.textMuted } }, nudges.map((nudge) => /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-nudge", key: nudge.id }, /* @__PURE__ */ ShipReact$3.createElement("span", { style: { opacity: 0.7 } }, "•"), nudge.message))) : null, error ? /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-warning", style: { background: "rgba(240, 74, 74, 0.12)", color: theme.error } }, error) : null, suggestion ? /* @__PURE__ */ ShipReact$3.createElement(
+  )), item.prompt.trim() ? /* @__PURE__ */ ShipReact$3.createElement("div", null, /* @__PURE__ */ ShipReact$3.createElement(
+    "button",
+    {
+      className: "change-fold",
+      style: { color: theme.textMuted, marginBottom: showPrompt ? 6 : 0 },
+      "aria-expanded": showPrompt,
+      onClick: () => setShowPrompt(!showPrompt)
+    },
+    showPrompt ? "▾" : "▸",
+    " Prompt (",
+    item.prompt.trim().split(/\s+/).length,
+    " words)"
+  ), showPrompt ? /* @__PURE__ */ ShipReact$3.createElement(
+    "div",
+    {
+      className: "change-code",
+      style: {
+        background: theme.bgSecondary,
+        color: theme.textSecondary,
+        border: `1px solid ${theme.border}`
+      }
+    },
+    item.prompt
+  ) : null) : null, nudges.length > 0 ? /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-nudges", style: { color: theme.textMuted } }, nudges.map((nudge) => /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-nudge", key: nudge.id }, /* @__PURE__ */ ShipReact$3.createElement("span", { style: { opacity: 0.7 } }, "•"), nudge.message))) : null, error ? /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-warning", style: { background: "rgba(240, 74, 74, 0.12)", color: theme.error } }, error) : null, suggestion ? /* @__PURE__ */ ShipReact$3.createElement(
     "div",
     {
       className: "change-diff",

@@ -15,8 +15,13 @@ import { findAgentCli } from '../agents.ts';
 import { improveWithAgent, type ImprovedPrompt } from '../ai.ts';
 import { useTheme } from '../context.ts';
 import { lintPrompt } from '../lint.ts';
-import { DIFFICULTY_LABELS, type ChangeItem, type Difficulty } from '../model.ts';
-import { TEMPLATES, fillSkeleton, type Template } from '../templates.ts';
+import {
+  DIFFICULTY_LABELS,
+  type ChangeItem,
+  type Difficulty,
+  type TemplateId,
+} from '../model.ts';
+import { TEMPLATES, composePrompt, findTemplate, type Template } from '../templates.ts';
 import type { Shell } from '../types.ts';
 import { IconButton, Spinner } from './parts.tsx';
 import { difficultyColor } from './row.tsx';
@@ -55,29 +60,57 @@ export function ItemEditor({
 }) {
   const theme = useTheme();
 
-  const [pendingTemplate, setPendingTemplate] = useState<Template | null>(null);
+  /** Shared by every box, so the form reads as one surface. */
+  const boxStyle = {
+    background: theme.bgPrimary,
+    color: theme.textPrimary,
+    border: `1px solid ${theme.border}`,
+  };
+
   const [improving, setImproving] = useState(false);
   const [suggestion, setSuggestion] = useState<ImprovedPrompt | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showPrompt, setShowPrompt] = useState(false);
 
   const nudges = lintPrompt(item.prompt);
+  const template = findTemplate(item.template);
 
-  const applyTemplate = useCallback(
-    (template: Template) => {
-      onChange({ prompt: fillSkeleton(template, item.title), template: template.id });
-      setPendingTemplate(null);
+  /**
+   * Any edit to a box recomposes the prompt.
+   *
+   * `prompt` stays the single thing the rest of the plugin reads, so sending,
+   * linting and ✨ Improve need no knowledge of templates at all.
+   */
+  const applyEdit = useCallback(
+    (patch: { template?: TemplateId | null; fields?: Record<string, string>; notes?: string }) => {
+      const nextTemplateId = patch.template !== undefined ? patch.template : item.template;
+      const nextFields = patch.fields ?? item.fields;
+      const nextNotes = patch.notes ?? item.notes;
+      onChange({
+        ...patch,
+        prompt: composePrompt(findTemplate(nextTemplateId), nextFields, nextNotes),
+      });
     },
-    [item.title, onChange]
+    [item.fields, item.notes, item.template, onChange]
   );
 
-  /** Inserting over existing text is destructive, so it asks first. */
+  const setField = useCallback(
+    (id: string, value: string) => applyEdit({ fields: { ...item.fields, [id]: value } }),
+    [applyEdit, item.fields]
+  );
+
+  /**
+   * Clicking the active template again clears it.
+   *
+   * Nothing is destroyed by switching: field values are kept under shared keys,
+   * so going Style → Bug carries `where` across, and the free-text box is never
+   * touched. That's why this no longer needs a "replace what you've written?"
+   * confirmation the way pasting a skeleton did.
+   */
   const pickTemplate = useCallback(
-    (template: Template) => {
-      if (item.prompt.trim()) setPendingTemplate(template);
-      else applyTemplate(template);
-    },
-    [applyTemplate, item.prompt]
+    (next: Template) => applyEdit({ template: item.template === next.id ? null : next.id }),
+    [applyEdit, item.template]
   );
 
   const cli = findAgentCli(improveCli);
@@ -102,10 +135,20 @@ export function ItemEditor({
     }
   }, [cli, improveEffort, improveModel, item.prompt, item.title, projectName, shell]);
 
+  /**
+   * An accepted rewrite becomes the free text, and the template steps aside.
+   *
+   * The rewrite is already a whole prompt. Leaving the boxes active would mean
+   * the very next keystroke in one of them recomposed straight over the top of
+   * it, quietly undoing the thing you just accepted.
+   */
   const acceptSuggestion = useCallback(() => {
     if (!suggestion) return;
     onChange({
       prompt: suggestion.prompt,
+      notes: suggestion.prompt,
+      template: null,
+      fields: {},
       difficulty: suggestion.difficulty,
       ...(suggestion.title ? { title: suggestion.title } : {}),
     });
@@ -152,68 +195,111 @@ export function ItemEditor({
         })}
       </div>
 
-      {/* Templates */}
-      <div>
-        <div className="change-templates">
-          {TEMPLATES.map((template) => (
-            <button
-              key={template.id}
-              className="change-template-btn"
-              style={{
-                border: `1px solid ${item.template === template.id ? theme.accent : theme.border}`,
-                color: item.template === template.id ? theme.accent : theme.textSecondary,
-              }}
-              title={template.hint}
-              onClick={() => pickTemplate(template)}
-            >
-              {template.label}
-            </button>
-          ))}
-        </div>
-
-        {pendingTemplate ? (
-          <div
-            className="change-warning change-button-row"
+      {/* Pick one to get boxes; click it again to go back to free text. */}
+      <div className="change-templates">
+        {TEMPLATES.map((entry) => (
+          <button
+            key={entry.id}
+            className="change-template-btn"
             style={{
-              background: 'rgba(127, 127, 127, 0.12)',
-              color: theme.textSecondary,
-              marginTop: 8,
+              border: `1px solid ${item.template === entry.id ? theme.accent : theme.border}`,
+              color: item.template === entry.id ? theme.accent : theme.textSecondary,
             }}
+            title={entry.hint}
+            aria-pressed={item.template === entry.id}
+            onClick={() => pickTemplate(entry)}
           >
-            <span style={{ flex: '1 1 140px', minWidth: 0 }}>
-              Replace what you&rsquo;ve written with the {pendingTemplate.label} template?
-            </span>
-            <button
-              className="change-btn"
-              style={{ background: theme.action, color: theme.actionText }}
-              onClick={() => applyTemplate(pendingTemplate)}
-            >
-              Replace
-            </button>
-            <button
-              className="change-btn"
-              style={{ background: 'transparent', color: theme.textMuted, border: `1px solid ${theme.border}` }}
-              onClick={() => setPendingTemplate(null)}
-            >
-              Cancel
-            </button>
-          </div>
-        ) : null}
+            {entry.label}
+          </button>
+        ))}
       </div>
 
-      {/* The prompt itself */}
-      <textarea
-        className="change-textarea"
-        style={{
-          background: theme.bgPrimary,
-          color: theme.textPrimary,
-          border: `1px solid ${theme.border}`,
-        }}
-        value={item.prompt}
-        placeholder="The instruction you'll hand to your agent. Pick a template above to start from a skeleton."
-        spellCheck={false}
-        onChange={(event) => onChange({ prompt: event.target.value })}
-      />
+      {/* One box per thing worth saying. Leave any of them blank. */}
+      {template ? (
+        <div className="change-fields">
+          {template.fields.map((field) => (
+            <label className="change-field" key={field.id}>
+              <span className="change-field-name" style={{ color: theme.textMuted }}>
+                {field.label}
+              </span>
+              {field.multiline ? (
+                <textarea
+                  className="change-input change-field-box change-field-multiline"
+                  style={boxStyle}
+                  value={item.fields[field.id] ?? ''}
+                  placeholder={field.placeholder}
+                  spellCheck={false}
+                  onChange={(event) => setField(field.id, event.target.value)}
+                />
+              ) : (
+                <input
+                  className="change-input change-field-box"
+                  style={boxStyle}
+                  value={item.fields[field.id] ?? ''}
+                  placeholder={field.placeholder}
+                  spellCheck={false}
+                  onChange={(event) => setField(field.id, event.target.value)}
+                />
+              )}
+            </label>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Free text: the whole prompt with no template, an extra note with one. */}
+      <label className="change-field">
+        {template ? (
+          <span className="change-field-name" style={{ color: theme.textMuted }}>
+            Anything else
+          </span>
+        ) : null}
+        <textarea
+          className="change-textarea"
+          style={boxStyle}
+          value={item.notes}
+          placeholder={
+            template
+              ? 'Optional — anything the boxes above don’t cover'
+              : "The instruction you'll hand to your agent. Or pick a template above to fill in boxes instead."
+          }
+          spellCheck={false}
+          onChange={(event) => applyEdit({ notes: event.target.value })}
+        />
+      </label>
+
+      {/*
+       * The assembled prompt, read-only.
+       *
+       * Read-only on purpose: it's built from the boxes, so anything typed here
+       * would be silently rebuilt away the next time you touched a field. The
+       * "Anything else" box above is the place for wording the boxes can't
+       * express, and because composition is plain string joining rather than a
+       * model, what you see here is exactly what gets sent.
+       */}
+      {item.prompt.trim() ? (
+        <div>
+          <button
+            className="change-fold"
+            style={{ color: theme.textMuted, marginBottom: showPrompt ? 6 : 0 }}
+            aria-expanded={showPrompt}
+            onClick={() => setShowPrompt(!showPrompt)}
+          >
+            {showPrompt ? '▾' : '▸'} Prompt ({item.prompt.trim().split(/\s+/).length} words)
+          </button>
+          {showPrompt ? (
+            <div
+              className="change-code"
+              style={{
+                background: theme.bgSecondary,
+                color: theme.textSecondary,
+                border: `1px solid ${theme.border}`,
+              }}
+            >
+              {item.prompt}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {nudges.length > 0 ? (
         <div className="change-nudges" style={{ color: theme.textMuted }}>
