@@ -21,6 +21,8 @@ export interface ImproveInput {
   projectName?: string | null;
   /** Which model to spend on the rewrite. From settings, in the CLI's naming. */
   model: string;
+  /** Reasoning effort, in the CLI's naming. Empty means the CLI's default. */
+  effort?: string;
 }
 
 export interface ImprovedPrompt {
@@ -182,7 +184,7 @@ export async function improveWithAgent(
   cli: AgentCli,
   input: ImproveInput
 ): Promise<ImproveOutcome> {
-  const args = cli.improveArgs(buildBrief(input), input.model);
+  const args = cli.improveArgs(buildBrief(input), input.model, input.effort);
 
   const result = await shell.exec(cli.binary, args, { timeout: 180 }).catch((error: unknown) => ({
     stdout: '',

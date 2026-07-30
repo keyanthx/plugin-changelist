@@ -79,9 +79,31 @@ The commands stay free text underneath, which means two things worth knowing:
 - **You can mix them.** The three templates are independent, so Easy can run a
   cheap OpenCode model while Hard runs Claude Opus.
 
-For OpenCode the model box is backed by a live list from `opencode models`, so
-you pick a real `provider/model` id instead of remembering one. Editing it
-rewrites only the `--model` flag and leaves the rest of your command alone.
+### Picking a model and effort
+
+Both are dropdowns, built from what the installed CLI actually reports rather
+than a list baked into the plugin:
+
+- **OpenCode** — `opencode models --verbose` returns a full catalogue locally, so
+  the picker shows real names grouped by provider with their context window and
+  whether they're free (`GLM 5.2 · 200k`, `Big Pickle · 200k · free`).
+- **Claude Code** — has no model-listing command, so its aliases and its effort
+  levels are read out of `claude --help`. A reworded help page falls back to a
+  curated list rather than an empty picker.
+
+**Effort follows the model.** OpenCode reports `variants` per model, and they
+genuinely differ — some offer `high`/`max`, others `low`/`medium`/`high`, and
+many none at all. The effort dropdown shows exactly that model's levels, and
+disappears when it has none, so it can never offer a value the model rejects.
+
+One asymmetry the UI is careful about: `--variant` exists only on
+`opencode run`, not the interactive command a send uses, and the OpenCode docs
+put reasoning effort in `opencode.json` instead. So for OpenCode **sends** the
+effort control is shown disabled with the reason; it's live for ✨ Improve, which
+runs headless. Claude's `--effort` works in both places.
+
+Both dropdowns rewrite only their own flag inside the command template and leave
+everything else you typed alone.
 
 ✨ Improve has **its own** CLI and model, separate from the send commands —
 rewriting a sentence doesn't need your most expensive model. It runs read-only
@@ -228,6 +250,7 @@ grep -c 'ReactCurrentDispatcher\|react-dom/client' dist/index.js   # must be 0
 | `src/dock.ts` | Window vs pinned state, position persistence, and which slot draws the panel |
 | `src/hostLayout.ts` | The only file that edits Ship Studio's DOM — makes room for the pinned dock, and puts it back |
 | `src/agents.ts` | The CLI registry — flags, presets, model handling. The only file that knows a tool's syntax |
+| `src/catalogue.ts` | Reads each CLI's own model list and effort levels, so nothing is hardcoded |
 | `src/model.ts` | The item and settings shapes, the storage schema guard, list operations |
 | `src/send.ts` | Shell quoting, command assembly, branch-name slugs |
 | `src/lint.ts` | The live nudges |

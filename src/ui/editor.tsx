@@ -29,6 +29,7 @@ export function ItemEditor({
   projectName,
   improveCli,
   improveModel,
+  improveEffort,
   improveAvailable,
   canMoveUp,
   canMoveDown,
@@ -42,6 +43,8 @@ export function ItemEditor({
   /** Which CLI ✨ Improve shells out to, from settings. */
   improveCli: string;
   improveModel: string;
+  /** Reasoning effort for the rewrite, from settings. */
+  improveEffort: string;
   /** False when that CLI isn't on the PATH — the button then hides. */
   improveAvailable: boolean;
   canMoveUp: boolean;
@@ -90,13 +93,14 @@ export function ItemEditor({
         prompt: item.prompt,
         projectName,
         model: improveModel,
+        effort: improveEffort,
       });
       if (outcome.ok) setSuggestion(outcome.improved);
       else setError(outcome.message);
     } finally {
       setImproving(false);
     }
-  }, [cli, improveModel, item.prompt, item.title, projectName, shell]);
+  }, [cli, improveEffort, improveModel, item.prompt, item.title, projectName, shell]);
 
   const acceptSuggestion = useCallback(() => {
     if (!suggestion) return;

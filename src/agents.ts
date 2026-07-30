@@ -25,8 +25,11 @@ export interface AgentCli {
   binary: string;
   /** Interactive, plan-mode command per difficulty. `{prompt}` is substituted. */
   defaultCommands: Record<Difficulty, string>;
-  /** Argv for a headless one-shot rewrite. Not a template — spawned directly. */
-  improveArgs: (brief: string, model: string) => string[];
+  /**
+   * Argv for a headless one-shot rewrite. Not a template — spawned directly.
+   * `effort` may be omitted or empty, meaning "the CLI's default".
+   */
+  improveArgs: (brief: string, model: string, effort?: string) => string[];
   /** Default model for ✨ Improve. Cheap and fast beats clever for a rewrite. */
   defaultImproveModel: string;
   /** `<binary> models` lists real ids we can offer as a dropdown. */
@@ -47,6 +50,26 @@ export interface AgentCli {
   midSessionModelSwitch:
     | { supported: true; /** Pasteable command that does it. */ command: (model: string) => string; how: string }
     | { supported: false; how: string };
+  /**
+   * Reasoning effort, and — importantly — *where* it can be set.
+   *
+   * The two tools differ in a way that matters: Claude takes `--effort` on any
+   * invocation, while OpenCode's `--variant` exists only on `opencode run`, not
+   * on the interactive command our sends use. Offering an effort control that
+   * silently does nothing is the same failure as the model that wouldn't
+   * change, so `scope` is recorded and the UI honours it.
+   */
+  effort:
+    | {
+        supported: true;
+        flag: string;
+        /** 'always' = any invocation. 'headless-only' = the one-shot form only. */
+        scope: 'always' | 'headless-only';
+        /** 'fixed' = one list for the CLI. 'per-model' = read from the catalogue. */
+        levels: 'fixed' | 'per-model';
+        how: string;
+      }
+    | { supported: false; how: string };
 }
 
 /**
@@ -64,7 +87,7 @@ const CLAUDE: AgentCli = {
     normal: 'claude --permission-mode plan --model sonnet {prompt}',
     hard: 'claude --permission-mode plan --model opus {prompt}',
   },
-  improveArgs: (brief, model) => {
+  improveArgs: (brief, model, effort) => {
     // Deliberately NO --permission-mode plan here. Claude's plan mode is a
     // behavioural contract, not just a permission profile: it answers with a
     // plan and refuses a "reply with only this JSON" instruction outright
@@ -72,6 +95,7 @@ const CLAUDE: AgentCli = {
     // JSON-only brief returns the object cleanly, which is what we need.
     const args = ['-p', brief, '--output-format', 'json'];
     if (model.trim()) args.push('--model', model.trim());
+    if (effort?.trim()) args.push('--effort', effort.trim());
     return args;
   },
   defaultImproveModel: 'haiku',
@@ -82,6 +106,14 @@ const CLAUDE: AgentCli = {
     supported: true,
     command: (model) => `/model ${model}`,
     how: 'Claude Code can switch mid-session — paste the /model line first.',
+  },
+  effort: {
+    supported: true,
+    flag: '--effort',
+    scope: 'always',
+    // The levels come from `claude --help` at runtime; see catalogue.ts.
+    levels: 'fixed',
+    how: 'Applies to both sending and ✨ Improve.',
   },
 };
 
@@ -103,13 +135,15 @@ const OPENCODE: AgentCli = {
     normal: 'opencode --agent plan --model opencode-go/glm-5.2 --prompt {prompt}',
     hard: 'opencode --agent plan --model opencode-go/kimi-k3 --prompt {prompt}',
   },
-  improveArgs: (brief, model) => {
+  improveArgs: (brief, model, effort) => {
     // `--agent plan` is a read-only permission profile in OpenCode, not a
     // behavioural mode, so it still answers a JSON-only brief verbatim
     // (tested). Worth having: without it `run` uses the `build` agent, which
     // is allowed to edit files in the project it runs in.
     const args = ['run', brief, '--agent', 'plan'];
     if (model.trim()) args.push('--model', model.trim());
+    // `run` is the one OpenCode form that accepts --variant.
+    if (effort?.trim()) args.push('--variant', effort.trim());
     return args;
   },
   defaultImproveModel: 'opencode-go/hy3',
@@ -121,6 +155,16 @@ const OPENCODE: AgentCli = {
     // `/models` opens an interactive picker; there is no `/model <id>` form and
     // no agent-switch command. A running session's model is fixed at launch.
     how: "OpenCode can't switch model mid-session — its /models is a picker. Start a new session to change it.",
+  },
+  effort: {
+    supported: true,
+    flag: '--variant',
+    // Verified against the installed CLI: --variant is on `opencode run` only.
+    // The interactive command has no such flag, and the docs put reasoning
+    // effort in opencode.json rather than on the command line.
+    scope: 'headless-only',
+    levels: 'per-model',
+    how: 'OpenCode takes effort only on headless runs, so this applies to ✨ Improve. For sessions, set reasoningEffort in opencode.json.',
   },
 };
 
@@ -156,6 +200,34 @@ export function withModel(command: string, model: string): string {
   }
   const parts = trimmed.split(/\s+/);
   parts.splice(1, 0, '--model', model);
+  return parts.join(' ');
+}
+
+/** The effort value inside a command template, if it carries one. */
+export function readEffortFromCommand(command: string, flag: string): string | null {
+  const match = command.match(new RegExp(`${flag}[ =]([^\\s]+)`));
+  return match ? match[1] : null;
+}
+
+/**
+ * Set, replace, or remove the effort flag in a command template.
+ *
+ * Passing an empty value removes the flag entirely, which is how "default"
+ * is expressed — an empty `--effort` would be rejected by the CLI.
+ */
+export function withEffort(command: string, flag: string, effort: string): string {
+  const trimmed = command.trim();
+  if (!trimmed) return trimmed;
+
+  const existing = new RegExp(`\\s*${flag}[ =][^\\s]+`);
+  const without = trimmed.replace(existing, '');
+
+  if (!effort) return without;
+
+  // Insert after the binary, for the same reason as withModel: appending would
+  // land it after `--prompt {prompt}` and be swallowed as message text.
+  const parts = without.split(/\s+/);
+  parts.splice(1, 0, flag, effort);
   return parts.join(' ');
 }
 

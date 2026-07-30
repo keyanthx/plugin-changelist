@@ -14,7 +14,9 @@ import {
   AGENT_CLIS,
   findAgentCli,
   parseModelList,
+  readEffortFromCommand,
   readModelFromCommand,
+  withEffort,
   withModel,
 } from '../src/agents.ts';
 import { buildCommand, shellQuote } from '../src/send.ts';
@@ -149,6 +151,70 @@ test('every CLI explains its mid-session behaviour in words', () => {
   for (const cli of AGENT_CLIS) {
     assert.ok(cli.midSessionModelSwitch.how.length > 20, `${cli.id} needs a real explanation`);
   }
+});
+
+// -------------------------------------------------------------------- effort
+
+test('Claude takes effort on any invocation', () => {
+  assert.equal(claude.effort.supported, true);
+  assert.equal(claude.effort.flag, '--effort');
+  assert.equal(claude.effort.scope, 'always');
+  assert.equal(claude.effort.levels, 'fixed');
+});
+
+test('OpenCode takes effort only on headless runs', () => {
+  // Verified against the CLI: --variant is on `opencode run`, not on the
+  // interactive command our sends use. If this ever flips to 'always', the UI
+  // starts offering a control that silently does nothing.
+  assert.equal(opencode.effort.supported, true);
+  assert.equal(opencode.effort.flag, '--variant');
+  assert.equal(opencode.effort.scope, 'headless-only');
+  assert.equal(opencode.effort.levels, 'per-model');
+});
+
+test('the effort flag is read back out of a command', () => {
+  assert.equal(readEffortFromCommand('claude --effort high {prompt}', '--effort'), 'high');
+  assert.equal(readEffortFromCommand('claude {prompt}', '--effort'), null);
+});
+
+test('setting effort inserts the flag after the binary', () => {
+  // Appending would land it after `--prompt {prompt}` and be read as message text.
+  assert.equal(
+    withEffort('claude --model opus {prompt}', '--effort', 'high'),
+    'claude --effort high --model opus {prompt}'
+  );
+});
+
+test('changing effort replaces rather than duplicates', () => {
+  const once = withEffort('claude --model opus {prompt}', '--effort', 'low');
+  const twice = withEffort(once, '--effort', 'max');
+  assert.equal(twice.match(/--effort/g).length, 1);
+  assert.match(twice, /--effort max/);
+});
+
+test('an empty effort removes the flag, expressing "default"', () => {
+  const withIt = withEffort('claude --model opus {prompt}', '--effort', 'high');
+  assert.equal(withEffort(withIt, '--effort', ''), 'claude --model opus {prompt}');
+});
+
+test('setting effort never disturbs the prompt placeholder', () => {
+  for (const cli of AGENT_CLIS) {
+    for (const difficulty of DIFFICULTIES) {
+      const flag = cli.effort.supported ? cli.effort.flag : '--effort';
+      const changed = withEffort(cli.defaultCommands[difficulty], flag, 'high');
+      assert.equal(changed.split('{prompt}').length - 1, 1, `${cli.id}/${difficulty}`);
+    }
+  }
+});
+
+test('effort and model can both be set without clobbering each other', () => {
+  let command = opencode.defaultCommands.normal;
+  command = withModel(command, 'opencode/laguna-s-2.1-free');
+  command = withEffort(command, '--variant', 'medium');
+  assert.match(command, /--model opencode\/laguna-s-2\.1-free/);
+  assert.match(command, /--variant medium/);
+  assert.match(command, /--agent plan/);
+  assert.equal(command.split('{prompt}').length - 1, 1);
 });
 
 // -------------------------------------------------------- model read / write

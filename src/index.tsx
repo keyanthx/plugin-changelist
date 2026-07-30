@@ -335,6 +335,7 @@ function Panel({ onClose }: { onClose: () => void }) {
                 projectName={ctx.project?.name ?? null}
                 improveCli={stored.settings.improveCli}
                 improveModel={stored.settings.improveModel}
+                improveEffort={stored.settings.improveEffort}
                 improveAvailable={improveAvailable}
                 canMoveUp={index > 0}
                 canMoveDown={index < items.length - 1}

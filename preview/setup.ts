@@ -75,24 +75,61 @@ async function exec(command: string, args: string[]) {
     return FLAGS.hasOpenCode ? ok('/opt/homebrew/bin/opencode') : fail('');
   }
 
-  // The model dropdown. This is the real 1.18.7 output shape: one
-  // provider/model per line, nothing else on stdout.
+  /*
+   * The model dropdown. `--verbose` returns a JSON object per model, and these
+   * shapes mirror real 1.18.7 output — including that `variants` differs per
+   * model and is often empty, which is exactly what the effort picker keys off.
+   */
   if (command === 'opencode' && args[0] === 'models') {
     // Counted so the preview can prove the settings effect runs once rather
     // than re-firing on every host render. Read `__modelListCalls` in devtools.
     const w = window as unknown as { __modelListCalls?: number };
     w.__modelListCalls = (w.__modelListCalls ?? 0) + 1;
+
+    const model = (
+      provider: string,
+      id: string,
+      name: string,
+      variants: string[],
+      free: boolean,
+      context = 200000
+    ) =>
+      `${provider}/${id}\n` +
+      JSON.stringify(
+        {
+          id,
+          providerID: provider,
+          name,
+          cost: { input: free ? 0 : 3, output: free ? 0 : 15 },
+          limit: { context },
+          capabilities: { reasoning: variants.length > 0 },
+          variants: Object.fromEntries(variants.map((v) => [v, {}])),
+        },
+        null,
+        2
+      );
+
     return ok(
       [
-        'opencode/big-pickle',
-        'opencode/deepseek-v4-flash-free',
-        'opencode/north-mini-code-free',
-        'opencode-go/deepseek-v4-flash',
-        'opencode-go/glm-5.2',
-        'opencode-go/hy3',
-        'opencode-go/kimi-k3',
-        'opencode-go/qwen3.7-max',
-        'ollama/qwen3.5',
+        model('opencode', 'big-pickle', 'Big Pickle', [], true),
+        model('opencode', 'north-mini-code-free', 'North Mini Code Free', ['none', 'high'], true, 256000),
+        model('opencode-go', 'hy3', 'Hy3', ['high', 'max'], false),
+        model('opencode-go', 'glm-5.2', 'GLM 5.2', ['low', 'medium', 'high'], false),
+        model('opencode-go', 'kimi-k3', 'Kimi K3', [], false, 262144),
+        model('ollama', 'qwen3.5', 'Qwen 3.5', [], true, 128000),
+      ].join('\n')
+    );
+  }
+
+  // Claude has no model-listing command, so the plugin reads its --help.
+  if (command === 'claude' && args[0] === '--help') {
+    return ok(
+      [
+        "  --model <model>     Model for the current session. Provide an alias for",
+        "                      the latest model (e.g. 'fable', 'opus', or 'sonnet')",
+        "                      or a model's full name (e.g. 'claude-fable-5').",
+        '  --effort <level>    Effort level for the current session',
+        '                      (low, medium, high, xhigh, max)',
       ].join('\n')
     );
   }

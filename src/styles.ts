@@ -145,6 +145,8 @@ export const CSS = `
 .change-frame .change-settings-row,
 .change-frame .change-editor-actions,
 .change-frame .change-row-main,
+.change-frame .change-picker-row,
+.change-frame .change-button-row,
 .change-frame .change-templates {
   display: flex !important;
   flex-direction: row !important;
@@ -425,6 +427,37 @@ export const CSS = `
   flex-wrap: wrap;
   min-width: 0;
 }
+
+/*
+ * Model and effort dropdowns.
+ *
+ * Native selects on purpose: the popup is drawn by the OS outside the panel, so
+ * a 260px dock still shows a 25-item list in full, and keyboard and
+ * screen-reader behaviour come free. min-width: 0 so they shrink with the dock
+ * rather than pushing the row wider than it.
+ */
+.change-picker-row {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.change-select {
+  flex: 1 1 130px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* Effort is the narrower of the pair — its values are single short words. */
+.change-select-effort { flex: 0 1 110px; }
 
 /* Any row of buttons. Wraps, because .change-btn is nowrap and a row of three
    is wider than a narrow dock — the one thing still overflowing at 260px. */

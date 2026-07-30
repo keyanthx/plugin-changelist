@@ -8,9 +8,10 @@ const CLAUDE = {
     normal: "claude --permission-mode plan --model sonnet {prompt}",
     hard: "claude --permission-mode plan --model opus {prompt}"
   },
-  improveArgs: (brief, model) => {
+  improveArgs: (brief, model, effort) => {
     const args = ["-p", brief, "--output-format", "json"];
     if (model.trim()) args.push("--model", model.trim());
+    if (effort == null ? void 0 : effort.trim()) args.push("--effort", effort.trim());
     return args;
   },
   defaultImproveModel: "haiku",
@@ -21,6 +22,14 @@ const CLAUDE = {
     supported: true,
     command: (model) => `/model ${model}`,
     how: "Claude Code can switch mid-session — paste the /model line first."
+  },
+  effort: {
+    supported: true,
+    flag: "--effort",
+    scope: "always",
+    // The levels come from `claude --help` at runtime; see catalogue.ts.
+    levels: "fixed",
+    how: "Applies to both sending and ✨ Improve."
   }
 };
 const OPENCODE = {
@@ -32,9 +41,10 @@ const OPENCODE = {
     normal: "opencode --agent plan --model opencode-go/glm-5.2 --prompt {prompt}",
     hard: "opencode --agent plan --model opencode-go/kimi-k3 --prompt {prompt}"
   },
-  improveArgs: (brief, model) => {
+  improveArgs: (brief, model, effort) => {
     const args = ["run", brief, "--agent", "plan"];
     if (model.trim()) args.push("--model", model.trim());
+    if (effort == null ? void 0 : effort.trim()) args.push("--variant", effort.trim());
     return args;
   },
   defaultImproveModel: "opencode-go/hy3",
@@ -46,6 +56,16 @@ const OPENCODE = {
     // `/models` opens an interactive picker; there is no `/model <id>` form and
     // no agent-switch command. A running session's model is fixed at launch.
     how: "OpenCode can't switch model mid-session — its /models is a picker. Start a new session to change it."
+  },
+  effort: {
+    supported: true,
+    flag: "--variant",
+    // Verified against the installed CLI: --variant is on `opencode run` only.
+    // The interactive command has no such flag, and the docs put reasoning
+    // effort in opencode.json rather than on the command line.
+    scope: "headless-only",
+    levels: "per-model",
+    how: "OpenCode takes effort only on headless runs, so this applies to ✨ Improve. For sessions, set reasoningEffort in opencode.json."
   }
 };
 const AGENT_CLIS = [CLAUDE, OPENCODE];
@@ -66,8 +86,19 @@ function withModel(command, model) {
   parts.splice(1, 0, "--model", model);
   return parts.join(" ");
 }
-function parseModelList(stdout) {
-  return stdout.split("\n").map((line) => line.trim()).filter((line) => /^[\w.-]+\/[\w.:-]+$/.test(line));
+function readEffortFromCommand(command, flag) {
+  const match = command.match(new RegExp(`${flag}[ =]([^\\s]+)`));
+  return match ? match[1] : null;
+}
+function withEffort(command, flag, effort) {
+  const trimmed = command.trim();
+  if (!trimmed) return trimmed;
+  const existing = new RegExp(`\\s*${flag}[ =][^\\s]+`);
+  const without = trimmed.replace(existing, "");
+  if (!effort) return without;
+  const parts = without.split(/\s+/);
+  parts.splice(1, 0, flag, effort);
+  return parts.join(" ");
 }
 async function copyText(text) {
   var _a;
@@ -218,7 +249,8 @@ const DEFAULT_SETTINGS = {
   createBranch: false,
   branchPrefix: "",
   improveCli: "claude",
-  improveModel: "haiku"
+  improveModel: "haiku",
+  improveEffort: ""
 };
 function emptyStored() {
   return { schema: 1, items: [], settings: { ...DEFAULT_SETTINGS } };
@@ -268,7 +300,8 @@ function readStored(raw) {
       createBranch: storedSettings.createBranch === true,
       branchPrefix: asString(storedSettings.branchPrefix, DEFAULT_SETTINGS.branchPrefix),
       improveCli: storedSettings.improveCli === "opencode" ? "opencode" : "claude",
-      improveModel: asString(storedSettings.improveModel, DEFAULT_SETTINGS.improveModel)
+      improveModel: asString(storedSettings.improveModel, DEFAULT_SETTINGS.improveModel),
+      improveEffort: asString(storedSettings.improveEffort, DEFAULT_SETTINGS.improveEffort)
     }
   };
 }
@@ -775,6 +808,8 @@ const CSS = `
 .change-frame .change-settings-row,
 .change-frame .change-editor-actions,
 .change-frame .change-row-main,
+.change-frame .change-picker-row,
+.change-frame .change-button-row,
 .change-frame .change-templates {
   display: flex !important;
   flex-direction: row !important;
@@ -1056,6 +1091,37 @@ const CSS = `
   min-width: 0;
 }
 
+/*
+ * Model and effort dropdowns.
+ *
+ * Native selects on purpose: the popup is drawn by the OS outside the panel, so
+ * a 260px dock still shows a 25-item list in full, and keyboard and
+ * screen-reader behaviour come free. min-width: 0 so they shrink with the dock
+ * rather than pushing the row wider than it.
+ */
+.change-picker-row {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.change-select {
+  flex: 1 1 130px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* Effort is the narrower of the pair — its values are single short words. */
+.change-select-effort { flex: 0 1 110px; }
+
 /* Any row of buttons. Wraps, because .change-btn is nowrap and a row of three
    is wider than a narrow dock — the one thing still overflowing at 260px. */
 .change-button-row {
@@ -1233,7 +1299,7 @@ function readImproved(value) {
   };
 }
 async function improveWithAgent(shell, cli, input) {
-  const args = cli.improveArgs(buildBrief(input), input.model);
+  const args = cli.improveArgs(buildBrief(input), input.model, input.effort);
   const result = await shell.exec(cli.binary, args, { timeout: 180 }).catch((error) => ({
     stdout: "",
     stderr: error instanceof Error ? error.message : String(error),
@@ -1718,6 +1784,7 @@ function ItemEditor({
   projectName,
   improveCli,
   improveModel,
+  improveEffort,
   improveAvailable,
   canMoveUp,
   canMoveDown,
@@ -1757,14 +1824,15 @@ function ItemEditor({
         title: item.title,
         prompt: item.prompt,
         projectName,
-        model: improveModel
+        model: improveModel,
+        effort: improveEffort
       });
       if (outcome.ok) setSuggestion(outcome.improved);
       else setError(outcome.message);
     } finally {
       setImproving(false);
     }
-  }, [cli, improveModel, item.prompt, item.title, projectName, shell]);
+  }, [cli, improveEffort, improveModel, item.prompt, item.title, projectName, shell]);
   const acceptSuggestion = useCallback(() => {
     if (!suggestion) return;
     onChange({
@@ -2076,6 +2144,92 @@ function ModeButton({
     /* @__PURE__ */ ShipReact$2.createElement("span", { style: { color: theme.textMuted, fontSize: 10.5 } }, detail)
   );
 }
+function parseOpenCodeCatalogue(stdout) {
+  const models = [];
+  for (const raw of extractJsonObjects(stdout)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    const id = typeof parsed.id === "string" ? parsed.id : "";
+    const provider = typeof parsed.providerID === "string" ? parsed.providerID : "";
+    if (!id || !provider) continue;
+    const cost = parsed.cost;
+    const limit = parsed.limit;
+    const capabilities = parsed.capabilities;
+    const variants = parsed.variants;
+    models.push({
+      id: `${provider}/${id}`,
+      provider,
+      name: typeof parsed.name === "string" && parsed.name ? parsed.name : id,
+      contextTokens: typeof (limit == null ? void 0 : limit.context) === "number" ? limit.context : null,
+      // Both sides must be free; a zero input price with a paid output isn't.
+      free: (cost == null ? void 0 : cost.input) === 0 && (cost == null ? void 0 : cost.output) === 0,
+      reasoning: (capabilities == null ? void 0 : capabilities.reasoning) === true,
+      variants: variants && typeof variants === "object" && !Array.isArray(variants) ? Object.keys(variants) : []
+    });
+  }
+  return models;
+}
+function extractJsonObjects(text) {
+  const objects = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+    } else if (char === "{") {
+      if (depth === 0) start = i;
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0 && start !== -1) {
+        objects.push(text.slice(start, i + 1));
+        start = -1;
+      }
+      if (depth < 0) depth = 0;
+    }
+  }
+  return objects;
+}
+function describeModel(model) {
+  const facts = [];
+  if (model.contextTokens) facts.push(formatContext(model.contextTokens));
+  if (model.free) facts.push("free");
+  return facts.length > 0 ? `${model.name} · ${facts.join(" · ")}` : model.name;
+}
+function formatContext(tokens) {
+  if (tokens >= 1e6) return `${Math.round(tokens / 1e5) / 10}M`;
+  return `${Math.round(tokens / 1e3)}k`;
+}
+function parseClaudeCapabilities(helpText) {
+  const effortMatch = helpText.match(/--effort[\s\S]{0,200}?\(([^)]+)\)/);
+  const effortLevels = effortMatch ? effortMatch[1].split(",").map((value) => value.trim()).filter((value) => /^[a-z][a-z-]*$/.test(value)) : [];
+  const modelSection = helpText.match(/--model <model>[\s\S]{0,400}/);
+  const quoted = modelSection ? [...modelSection[0].matchAll(/'([a-z][\w.-]*)'/g)].map((m) => m[1]) : [];
+  const aliases = quoted.filter((value) => !value.includes("-") || !value.startsWith("claude"));
+  return {
+    effortLevels: effortLevels.length > 0 ? effortLevels : DEFAULT_EFFORT_LEVELS,
+    aliases: mergeAliases(aliases)
+  };
+}
+const DEFAULT_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+function mergeAliases(discovered) {
+  const curated = ["haiku", "sonnet", "opus", "fable"];
+  const extras = discovered.filter((alias) => !curated.includes(alias));
+  return [...curated, ...extras];
+}
 const CONTAINING_BLOCK_PROPS = ["transform", "filter", "perspective", "contain", "backdropFilter"];
 function describeElement(element) {
   const id = element.id ? `#${element.id}` : "";
@@ -2168,6 +2322,50 @@ const DIFFICULTIES = ["easy", "normal", "hard"];
 function binaryOf(command) {
   return command.trim().split(/\s+/)[0] ?? "";
 }
+function CommandPickers({
+  command,
+  models,
+  selectedModel,
+  effortFlag,
+  effortLevels,
+  effortApplies,
+  effortNote,
+  onChange
+}) {
+  const theme = useTheme();
+  const selectStyle = {
+    background: theme.bgPrimary,
+    color: theme.textPrimary,
+    border: `1px solid ${theme.border}`
+  };
+  const groups = [...new Set(models.map((m) => m.group).filter(Boolean))];
+  const currentEffort = effortFlag ? readEffortFromCommand(command, effortFlag) : null;
+  return /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-picker-row" }, models.length > 0 ? /* @__PURE__ */ ShipReact$1.createElement(
+    "select",
+    {
+      className: "change-select",
+      style: selectStyle,
+      value: selectedModel ?? "",
+      title: "Model",
+      onChange: (event) => onChange(withModel(command, event.target.value))
+    },
+    selectedModel && !models.some((m) => m.value === selectedModel) ? /* @__PURE__ */ ShipReact$1.createElement("option", { value: selectedModel }, selectedModel, " (not in list)") : null,
+    !selectedModel ? /* @__PURE__ */ ShipReact$1.createElement("option", { value: "" }, "Default model") : null,
+    groups.length > 0 ? groups.map((group) => /* @__PURE__ */ ShipReact$1.createElement("optgroup", { key: group, label: group }, models.filter((m) => m.group === group).map((m) => /* @__PURE__ */ ShipReact$1.createElement("option", { key: m.value, value: m.value }, m.label)))) : models.map((m) => /* @__PURE__ */ ShipReact$1.createElement("option", { key: m.value, value: m.value }, m.label))
+  ) : null, effortFlag && effortLevels.length > 0 ? /* @__PURE__ */ ShipReact$1.createElement(
+    "select",
+    {
+      className: "change-select change-select-effort",
+      style: { ...selectStyle, opacity: effortApplies ? 1 : 0.5 },
+      value: currentEffort ?? "",
+      disabled: !effortApplies,
+      title: effortApplies ? "Reasoning effort" : effortNote ?? "Not available here",
+      onChange: (event) => onChange(withEffort(command, effortFlag, event.target.value))
+    },
+    /* @__PURE__ */ ShipReact$1.createElement("option", { value: "" }, "Default effort"),
+    effortLevels.map((level) => /* @__PURE__ */ ShipReact$1.createElement("option", { key: level, value: level }, level))
+  ) : null);
+}
 function matchesPreset(commands, cli) {
   return DIFFICULTIES.every((difficulty) => commands[difficulty] === cli.defaultCommands[difficulty]);
 }
@@ -2180,24 +2378,42 @@ function SettingsView({
 }) {
   const theme = useTheme();
   const [openCodeModels, setOpenCodeModels] = useState([]);
+  const [claudeCaps, setClaudeCaps] = useState(
+    () => parseClaudeCapabilities("")
+  );
   const [pendingPreset, setPendingPreset] = useState(null);
   const shellRef = useRef(shell);
   shellRef.current = shell;
   const hasOpenCode = installedClis.opencode === true;
+  const hasClaude = installedClis.claude === true;
   useEffect(() => {
     if (!hasOpenCode) return;
     let cancelled = false;
     void (async () => {
       const current = shellRef.current;
       if (!current) return;
-      const result = await current.exec("opencode", ["models"], { timeout: 20 }).catch(() => null);
+      const result = await current.exec("opencode", ["models", "--verbose"], { timeout: 30 }).catch(() => null);
       if (cancelled || !result || result.exit_code !== 0) return;
-      setOpenCodeModels(parseModelList(result.stdout));
+      setOpenCodeModels(parseOpenCodeCatalogue(result.stdout));
     })();
     return () => {
       cancelled = true;
     };
   }, [hasOpenCode]);
+  useEffect(() => {
+    if (!hasClaude) return;
+    let cancelled = false;
+    void (async () => {
+      const current = shellRef.current;
+      if (!current) return;
+      const result = await current.exec("claude", ["--help"], { timeout: 20 }).catch(() => null);
+      if (cancelled || !result) return;
+      setClaudeCaps(parseClaudeCapabilities(result.stdout || result.stderr));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasClaude]);
   const inputStyle = {
     background: theme.bgPrimary,
     color: theme.textPrimary,
@@ -2212,11 +2428,31 @@ function SettingsView({
     if (isCustomised) setPendingPreset(cli);
     else applyPreset(cli);
   };
-  const modelOptionsFor = (command) => {
+  const pickersFor = (command, headless) => {
+    var _a;
     const binary = binaryOf(command);
-    if (binary === "opencode") return openCodeModels;
-    const cli = AGENT_CLIS.find((entry) => entry.binary === binary);
-    return cli ? cli.modelSuggestions : [];
+    const cli = AGENT_CLIS.find((entry) => entry.binary === binary) ?? null;
+    const selectedModel = readModelFromCommand(command);
+    const models = binary === "opencode" ? openCodeModels.map((model) => ({
+      value: model.id,
+      label: describeModel(model),
+      group: model.provider,
+      variants: model.variants
+    })) : binary === "claude" ? claudeCaps.aliases.map((alias) => ({ value: alias, label: alias, group: null, variants: [] })) : [];
+    let effortLevels = [];
+    if (cli == null ? void 0 : cli.effort.supported) {
+      effortLevels = cli.effort.levels === "per-model" ? ((_a = models.find((m) => m.value === selectedModel)) == null ? void 0 : _a.variants) ?? [] : claudeCaps.effortLevels;
+    }
+    const effortApplies = (cli == null ? void 0 : cli.effort.supported) === true && (cli.effort.scope === "always" || headless);
+    return {
+      cli,
+      models,
+      selectedModel,
+      effortFlag: (cli == null ? void 0 : cli.effort.supported) ? cli.effort.flag : null,
+      effortLevels,
+      effortApplies,
+      effortNote: (cli == null ? void 0 : cli.effort.supported) ? cli.effort.how : null
+    };
   };
   return /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings" }, /* @__PURE__ */ ShipReact$1.createElement(Field, { label: "Agent CLI" }, /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-radio-row" }, AGENT_CLIS.map((cli) => {
     const installed = installedClis[cli.id] === true;
@@ -2271,9 +2507,7 @@ function SettingsView({
     )
   ) : null, /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-note", style: { color: theme.textMuted, marginTop: 8 } }, "Both presets start the agent in ", /* @__PURE__ */ ShipReact$1.createElement("strong", null, "plan mode"), " with your prompt as the first message, so it proposes before it edits.")), /* @__PURE__ */ ShipReact$1.createElement(Field, { label: "Command per difficulty" }, /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-grid" }, DIFFICULTIES.map((difficulty) => {
     const command = settings.commands[difficulty];
-    const options = modelOptionsFor(command);
-    const selected = readModelFromCommand(command) ?? "";
-    const listId = `change-models-${difficulty}`;
+    const pickers = pickersFor(command, false);
     return /* @__PURE__ */ ShipReact$1.createElement("div", { key: difficulty, style: { display: "flex", flexDirection: "column", gap: 5 } }, /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-row" }, /* @__PURE__ */ ShipReact$1.createElement(
       "span",
       {
@@ -2281,23 +2515,19 @@ function SettingsView({
         style: { color: difficultyColor(difficulty, theme) }
       },
       DIFFICULTY_LABELS[difficulty]
-    ), options.length > 0 ? /* @__PURE__ */ ShipReact$1.createElement(ShipReact$1.Fragment, null, /* @__PURE__ */ ShipReact$1.createElement(
-      "input",
+    ), /* @__PURE__ */ ShipReact$1.createElement(
+      CommandPickers,
       {
-        className: "change-input change-mono",
-        style: inputStyle,
-        list: listId,
-        value: selected,
-        spellCheck: false,
-        placeholder: "model",
-        onChange: (event) => onChange({
-          commands: {
-            ...settings.commands,
-            [difficulty]: withModel(command, event.target.value)
-          }
-        })
+        command,
+        models: pickers.models,
+        selectedModel: pickers.selectedModel,
+        effortFlag: pickers.effortFlag,
+        effortLevels: pickers.effortLevels,
+        effortApplies: pickers.effortApplies,
+        effortNote: pickers.effortNote,
+        onChange: (next) => onChange({ commands: { ...settings.commands, [difficulty]: next } })
       }
-    ), /* @__PURE__ */ ShipReact$1.createElement("datalist", { id: listId }, options.map((model) => /* @__PURE__ */ ShipReact$1.createElement("option", { key: model, value: model })))) : null), /* @__PURE__ */ ShipReact$1.createElement(
+    )), /* @__PURE__ */ ShipReact$1.createElement(
       "input",
       {
         className: "change-input change-mono change-command-input",
@@ -2356,6 +2586,7 @@ function SettingsView({
       settings,
       installedClis,
       openCodeModels,
+      claudeCaps,
       onChange
     }
   ), /* @__PURE__ */ ShipReact$1.createElement(LayoutDiagnostics, null));
@@ -2430,12 +2661,20 @@ function ImproveSettings({
   settings,
   installedClis,
   openCodeModels,
+  claudeCaps,
   onChange
 }) {
+  var _a;
   const theme = useTheme();
   const cli = findAgentCli(settings.improveCli);
   const installed = installedClis[cli.id] === true;
-  const options = cli.listsModels ? openCodeModels : cli.modelSuggestions;
+  const models = cli.listsModels ? openCodeModels.map((model) => ({
+    value: model.id,
+    label: describeModel(model),
+    group: model.provider,
+    variants: model.variants
+  })) : claudeCaps.aliases.map((alias) => ({ value: alias, label: alias, group: null, variants: [] }));
+  const effortLevels = cli.effort.supported ? cli.effort.levels === "per-model" ? ((_a = models.find((m) => m.value === settings.improveModel)) == null ? void 0 : _a.variants) ?? [] : claudeCaps.effortLevels : [];
   return /* @__PURE__ */ ShipReact$1.createElement(Field, { label: "✨ Improve" }, /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-radio-row" }, AGENT_CLIS.map((entry) => {
     const entryInstalled = installedClis[entry.id] === true;
     const active = settings.improveCli === entry.id;
@@ -2452,27 +2691,49 @@ function ImproveSettings({
         },
         disabled: !entryInstalled,
         title: entryInstalled ? void 0 : `\`${entry.binary}\` isn't on Ship Studio's PATH`,
-        onClick: () => onChange({ improveCli: entry.id, improveModel: entry.defaultImproveModel })
+        onClick: () => (
+          // Effort is reset with the CLI: the levels are CLI-specific, so
+          // carrying "xhigh" over to OpenCode would be an invalid value.
+          onChange({
+            improveCli: entry.id,
+            improveModel: entry.defaultImproveModel,
+            improveEffort: ""
+          })
+        )
       },
       entry.label
     );
-  })), /* @__PURE__ */ ShipReact$1.createElement(
-    "input",
+  })), /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-picker-row", style: { marginTop: 9 } }, /* @__PURE__ */ ShipReact$1.createElement(
+    "select",
     {
-      className: "change-input change-mono",
+      className: "change-select",
       style: {
         background: theme.bgPrimary,
         color: theme.textPrimary,
-        border: `1px solid ${theme.border}`,
-        marginTop: 9
+        border: `1px solid ${theme.border}`
       },
-      list: "change-improve-models",
       value: settings.improveModel,
-      spellCheck: false,
-      placeholder: cli.defaultImproveModel,
-      onChange: (event) => onChange({ improveModel: event.target.value })
-    }
-  ), /* @__PURE__ */ ShipReact$1.createElement("datalist", { id: "change-improve-models" }, options.map((model) => /* @__PURE__ */ ShipReact$1.createElement("option", { key: model, value: model }))), /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-note", style: { color: theme.textMuted, marginTop: 6 } }, installed ? `${cli.modelHint} Runs read-only — it can't edit your files.` : `\`${cli.binary}\` isn't on Ship Studio's PATH, so Improve is hidden. Templates and hints still work.`));
+      title: "Model",
+      onChange: (event) => onChange({ improveModel: event.target.value, improveEffort: "" })
+    },
+    !models.some((m) => m.value === settings.improveModel) ? /* @__PURE__ */ ShipReact$1.createElement("option", { value: settings.improveModel }, settings.improveModel || "Default", " (not in list)") : null,
+    [...new Set(models.map((m) => m.group).filter(Boolean))].length > 0 ? [...new Set(models.map((m) => m.group).filter(Boolean))].map((group) => /* @__PURE__ */ ShipReact$1.createElement("optgroup", { key: group, label: group }, models.filter((m) => m.group === group).map((m) => /* @__PURE__ */ ShipReact$1.createElement("option", { key: m.value, value: m.value }, m.label)))) : models.map((m) => /* @__PURE__ */ ShipReact$1.createElement("option", { key: m.value, value: m.value }, m.label))
+  ), effortLevels.length > 0 ? /* @__PURE__ */ ShipReact$1.createElement(
+    "select",
+    {
+      className: "change-select change-select-effort",
+      style: {
+        background: theme.bgPrimary,
+        color: theme.textPrimary,
+        border: `1px solid ${theme.border}`
+      },
+      value: settings.improveEffort,
+      title: "Reasoning effort",
+      onChange: (event) => onChange({ improveEffort: event.target.value })
+    },
+    /* @__PURE__ */ ShipReact$1.createElement("option", { value: "" }, "Default effort"),
+    effortLevels.map((level) => /* @__PURE__ */ ShipReact$1.createElement("option", { key: level, value: level }, level))
+  ) : null), /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-note", style: { color: theme.textMuted, marginTop: 6 } }, installed ? `${cli.modelHint} Runs read-only — it can't edit your files.` : `\`${cli.binary}\` isn't on Ship Studio's PATH, so Improve is hidden. Templates and hints still work.`));
 }
 const ShipReact = window.__SHIPSTUDIO_REACT__;
 const SAVE_DEBOUNCE_MS = 400;
@@ -2661,6 +2922,7 @@ function Panel({ onClose }) {
           projectName: ((_a = ctx.project) == null ? void 0 : _a.name) ?? null,
           improveCli: stored.settings.improveCli,
           improveModel: stored.settings.improveModel,
+          improveEffort: stored.settings.improveEffort,
           improveAvailable,
           canMoveUp: index > 0,
           canMoveDown: index < items.length - 1,

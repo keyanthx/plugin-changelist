@@ -11,11 +11,19 @@ import { useEffect, useRef, useState } from 'react';
 import {
   AGENT_CLIS,
   findAgentCli,
-  parseModelList,
+  readEffortFromCommand,
   readModelFromCommand,
+  withEffort,
   withModel,
   type AgentCli,
 } from '../agents.ts';
+import {
+  describeModel,
+  parseClaudeCapabilities,
+  parseOpenCodeCatalogue,
+  type CatalogueModel,
+  type ClaudeCapabilities,
+} from '../catalogue.ts';
 import { copyText } from '../clipboard.ts';
 import { useTheme } from '../context.ts';
 import { collectDiagnostics } from '../diagnostics.ts';
@@ -31,6 +39,113 @@ const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard'];
 /** The binary a command template invokes — its first word. */
 function binaryOf(command: string): string {
   return command.trim().split(/\s+/)[0] ?? '';
+}
+
+interface ModelChoice {
+  value: string;
+  label: string;
+  /** Provider, used to group the dropdown. Null when there's nothing to group by. */
+  group: string | null;
+  /** Effort levels this model accepts, when the CLI reports them per model. */
+  variants: string[];
+}
+
+/**
+ * The model and effort pickers for one command.
+ *
+ * Native `<select>` deliberately: its popup is drawn by the OS *outside* the
+ * panel, so a 260px dock can still show a 25-item list without clipping it, and
+ * keyboard and screen-reader behaviour come for free.
+ *
+ * Both dropdowns edit only their own flag inside the command template — the raw
+ * template stays the source of truth, and stays editable underneath.
+ */
+function CommandPickers({
+  command,
+  models,
+  selectedModel,
+  effortFlag,
+  effortLevels,
+  effortApplies,
+  effortNote,
+  onChange,
+}: {
+  command: string;
+  models: ModelChoice[];
+  selectedModel: string | null;
+  effortFlag: string | null;
+  effortLevels: string[];
+  effortApplies: boolean;
+  effortNote: string | null;
+  onChange: (command: string) => void;
+}) {
+  const theme = useTheme();
+
+  const selectStyle = {
+    background: theme.bgPrimary,
+    color: theme.textPrimary,
+    border: `1px solid ${theme.border}`,
+  };
+
+  const groups = [...new Set(models.map((m) => m.group).filter(Boolean))] as string[];
+  const currentEffort = effortFlag ? readEffortFromCommand(command, effortFlag) : null;
+
+  return (
+    <div className="change-picker-row">
+      {models.length > 0 ? (
+        <select
+          className="change-select"
+          style={selectStyle}
+          value={selectedModel ?? ''}
+          title="Model"
+          onChange={(event) => onChange(withModel(command, event.target.value))}
+        >
+          {/* Shown only when the command names a model we don't recognise, so
+              a hand-typed id isn't silently replaced by the first option. */}
+          {selectedModel && !models.some((m) => m.value === selectedModel) ? (
+            <option value={selectedModel}>{selectedModel} (not in list)</option>
+          ) : null}
+          {!selectedModel ? <option value="">Default model</option> : null}
+
+          {groups.length > 0
+            ? groups.map((group) => (
+                <optgroup key={group} label={group}>
+                  {models
+                    .filter((m) => m.group === group)
+                    .map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                </optgroup>
+              ))
+            : models.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+        </select>
+      ) : null}
+
+      {effortFlag && effortLevels.length > 0 ? (
+        <select
+          className="change-select change-select-effort"
+          style={{ ...selectStyle, opacity: effortApplies ? 1 : 0.5 }}
+          value={currentEffort ?? ''}
+          disabled={!effortApplies}
+          title={effortApplies ? 'Reasoning effort' : (effortNote ?? 'Not available here')}
+          onChange={(event) => onChange(withEffort(command, effortFlag, event.target.value))}
+        >
+          <option value="">Default effort</option>
+          {effortLevels.map((level) => (
+            <option key={level} value={level}>
+              {level}
+            </option>
+          ))}
+        </select>
+      ) : null}
+    </div>
+  );
 }
 
 /** Are these commands exactly one of the shipped presets, or hand-edited? */
@@ -55,7 +170,12 @@ export function SettingsView({
 }) {
   const theme = useTheme();
 
-  const [openCodeModels, setOpenCodeModels] = useState<string[]>([]);
+  /** OpenCode's full catalogue, so the picker can show real names and variants. */
+  const [openCodeModels, setOpenCodeModels] = useState<CatalogueModel[]>([]);
+  /** Claude's effort levels and aliases, read from its own --help. */
+  const [claudeCaps, setClaudeCaps] = useState<ClaudeCapabilities>(() =>
+    parseClaudeCapabilities('')
+  );
   const [pendingPreset, setPendingPreset] = useState<AgentCli | null>(null);
 
   /**
@@ -68,21 +188,49 @@ export function SettingsView({
   shellRef.current = shell;
 
   const hasOpenCode = installedClis.opencode === true;
+  const hasClaude = installedClis.claude === true;
 
+  /**
+   * Ask each installed CLI what it can do, once when Settings opens.
+   *
+   * Both commands are local and fast (`opencode models --verbose` is ~0.5s off
+   * a local cache), so there's no need to persist the result — and asking every
+   * time means a CLI update shows up immediately rather than being remembered
+   * wrongly.
+   */
   useEffect(() => {
     if (!hasOpenCode) return;
     let cancelled = false;
     void (async () => {
       const current = shellRef.current;
       if (!current) return;
-      const result = await current.exec('opencode', ['models'], { timeout: 20 }).catch(() => null);
+      const result = await current
+        .exec('opencode', ['models', '--verbose'], { timeout: 30 })
+        .catch(() => null);
       if (cancelled || !result || result.exit_code !== 0) return;
-      setOpenCodeModels(parseModelList(result.stdout));
+      setOpenCodeModels(parseOpenCodeCatalogue(result.stdout));
     })();
     return () => {
       cancelled = true;
     };
   }, [hasOpenCode]);
+
+  useEffect(() => {
+    if (!hasClaude) return;
+    let cancelled = false;
+    void (async () => {
+      const current = shellRef.current;
+      if (!current) return;
+      const result = await current.exec('claude', ['--help'], { timeout: 20 }).catch(() => null);
+      if (cancelled || !result) return;
+      // Claude has no model-listing command, so its own help text is the only
+      // live source for the effort enum and the model aliases.
+      setClaudeCaps(parseClaudeCapabilities(result.stdout || result.stderr));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasClaude]);
 
   const inputStyle = {
     background: theme.bgPrimary,
@@ -103,12 +251,51 @@ export function SettingsView({
     else applyPreset(cli);
   };
 
-  /** The model options for whichever binary this command line invokes. */
-  const modelOptionsFor = (command: string): string[] => {
+  /**
+   * Everything the pickers need for one command line, derived from the command
+   * itself rather than a setting — the templates are free text and can mix
+   * tools per difficulty, so the first word is the only reliable source.
+   */
+  const pickersFor = (command: string, headless: boolean) => {
     const binary = binaryOf(command);
-    if (binary === 'opencode') return openCodeModels;
-    const cli = AGENT_CLIS.find((entry) => entry.binary === binary);
-    return cli ? cli.modelSuggestions : [];
+    const cli = AGENT_CLIS.find((entry) => entry.binary === binary) ?? null;
+    const selectedModel = readModelFromCommand(command);
+
+    const models: ModelChoice[] =
+      binary === 'opencode'
+        ? openCodeModels.map((model) => ({
+            value: model.id,
+            label: describeModel(model),
+            group: model.provider,
+            variants: model.variants,
+          }))
+        : binary === 'claude'
+          ? claudeCaps.aliases.map((alias) => ({ value: alias, label: alias, group: null, variants: [] }))
+          : [];
+
+    // Effort levels: fixed per CLI for Claude, per-model for OpenCode.
+    let effortLevels: string[] = [];
+    if (cli?.effort.supported) {
+      effortLevels =
+        cli.effort.levels === 'per-model'
+          ? (models.find((m) => m.value === selectedModel)?.variants ?? [])
+          : claudeCaps.effortLevels;
+    }
+
+    // A control that can't take effect is worse than no control — see the
+    // model-that-wouldn't-change bug. OpenCode's flag is headless-only.
+    const effortApplies =
+      cli?.effort.supported === true && (cli.effort.scope === 'always' || headless);
+
+    return {
+      cli,
+      models,
+      selectedModel,
+      effortFlag: cli?.effort.supported ? cli.effort.flag : null,
+      effortLevels,
+      effortApplies,
+      effortNote: cli?.effort.supported ? cli.effort.how : null,
+    };
   };
 
   return (
@@ -185,9 +372,9 @@ export function SettingsView({
         <div className="change-settings-grid">
           {DIFFICULTIES.map((difficulty) => {
             const command = settings.commands[difficulty];
-            const options = modelOptionsFor(command);
-            const selected = readModelFromCommand(command) ?? '';
-            const listId = `change-models-${difficulty}`;
+            // Sends launch an interactive session, so headless-only effort
+            // flags don't apply here.
+            const pickers = pickersFor(command, false);
 
             return (
               <div key={difficulty} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -199,34 +386,18 @@ export function SettingsView({
                     {DIFFICULTY_LABELS[difficulty]}
                   </span>
 
-                  {options.length > 0 ? (
-                    <>
-                      {/* A datalist keeps the field editable while still
-                          offering the real model ids — a hard <select> would
-                          lock out anything the list doesn't know about. */}
-                      <input
-                        className="change-input change-mono"
-                        style={inputStyle}
-                        list={listId}
-                        value={selected}
-                        spellCheck={false}
-                        placeholder="model"
-                        onChange={(event) =>
-                          onChange({
-                            commands: {
-                              ...settings.commands,
-                              [difficulty]: withModel(command, event.target.value),
-                            },
-                          })
-                        }
-                      />
-                      <datalist id={listId}>
-                        {options.map((model) => (
-                          <option key={model} value={model} />
-                        ))}
-                      </datalist>
-                    </>
-                  ) : null}
+                  <CommandPickers
+                    command={command}
+                    models={pickers.models}
+                    selectedModel={pickers.selectedModel}
+                    effortFlag={pickers.effortFlag}
+                    effortLevels={pickers.effortLevels}
+                    effortApplies={pickers.effortApplies}
+                    effortNote={pickers.effortNote}
+                    onChange={(next) =>
+                      onChange({ commands: { ...settings.commands, [difficulty]: next } })
+                    }
+                  />
                 </div>
 
                 {/* The indent is a class, not an inline style, so the narrow
@@ -313,6 +484,7 @@ export function SettingsView({
         settings={settings}
         installedClis={installedClis}
         openCodeModels={openCodeModels}
+        claudeCaps={claudeCaps}
         onChange={onChange}
       />
 
@@ -446,17 +618,38 @@ function ImproveSettings({
   settings,
   installedClis,
   openCodeModels,
+  claudeCaps,
   onChange,
 }: {
   settings: Settings;
   installedClis: Record<string, boolean>;
-  openCodeModels: string[];
+  openCodeModels: CatalogueModel[];
+  claudeCaps: ClaudeCapabilities;
   onChange: (patch: Partial<Settings>) => void;
 }) {
   const theme = useTheme();
   const cli = findAgentCli(settings.improveCli);
   const installed = installedClis[cli.id] === true;
-  const options = cli.listsModels ? openCodeModels : cli.modelSuggestions;
+
+  const models: ModelChoice[] = cli.listsModels
+    ? openCodeModels.map((model) => ({
+        value: model.id,
+        label: describeModel(model),
+        group: model.provider,
+        variants: model.variants,
+      }))
+    : claudeCaps.aliases.map((alias) => ({ value: alias, label: alias, group: null, variants: [] }));
+
+  /*
+   * Improve is headless, so this is the one place OpenCode's effort flag
+   * genuinely applies — hence `true` for the headless argument. Levels come
+   * from the chosen model for OpenCode, and from Claude's own --help for Claude.
+   */
+  const effortLevels = cli.effort.supported
+    ? cli.effort.levels === 'per-model'
+      ? (models.find((m) => m.value === settings.improveModel)?.variants ?? [])
+      : claudeCaps.effortLevels
+    : [];
 
   return (
     <Field label="✨ Improve">
@@ -477,7 +670,13 @@ function ImproveSettings({
               disabled={!entryInstalled}
               title={entryInstalled ? undefined : `\`${entry.binary}\` isn't on Ship Studio's PATH`}
               onClick={() =>
-                onChange({ improveCli: entry.id, improveModel: entry.defaultImproveModel })
+                // Effort is reset with the CLI: the levels are CLI-specific, so
+                // carrying "xhigh" over to OpenCode would be an invalid value.
+                onChange({
+                  improveCli: entry.id,
+                  improveModel: entry.defaultImproveModel,
+                  improveEffort: '',
+                })
               }
             >
               {entry.label}
@@ -486,25 +685,63 @@ function ImproveSettings({
         })}
       </div>
 
-      <input
-        className="change-input change-mono"
-        style={{
-          background: theme.bgPrimary,
-          color: theme.textPrimary,
-          border: `1px solid ${theme.border}`,
-          marginTop: 9,
-        }}
-        list="change-improve-models"
-        value={settings.improveModel}
-        spellCheck={false}
-        placeholder={cli.defaultImproveModel}
-        onChange={(event) => onChange({ improveModel: event.target.value })}
-      />
-      <datalist id="change-improve-models">
-        {options.map((model) => (
-          <option key={model} value={model} />
-        ))}
-      </datalist>
+      <div className="change-picker-row" style={{ marginTop: 9 }}>
+        <select
+          className="change-select"
+          style={{
+            background: theme.bgPrimary,
+            color: theme.textPrimary,
+            border: `1px solid ${theme.border}`,
+          }}
+          value={settings.improveModel}
+          title="Model"
+          onChange={(event) => onChange({ improveModel: event.target.value, improveEffort: '' })}
+        >
+          {!models.some((m) => m.value === settings.improveModel) ? (
+            <option value={settings.improveModel}>
+              {settings.improveModel || 'Default'} (not in list)
+            </option>
+          ) : null}
+          {[...new Set(models.map((m) => m.group).filter(Boolean))].length > 0
+            ? ([...new Set(models.map((m) => m.group).filter(Boolean))] as string[]).map((group) => (
+                <optgroup key={group} label={group}>
+                  {models
+                    .filter((m) => m.group === group)
+                    .map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                </optgroup>
+              ))
+            : models.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+        </select>
+
+        {effortLevels.length > 0 ? (
+          <select
+            className="change-select change-select-effort"
+            style={{
+              background: theme.bgPrimary,
+              color: theme.textPrimary,
+              border: `1px solid ${theme.border}`,
+            }}
+            value={settings.improveEffort}
+            title="Reasoning effort"
+            onChange={(event) => onChange({ improveEffort: event.target.value })}
+          >
+            <option value="">Default effort</option>
+            {effortLevels.map((level) => (
+              <option key={level} value={level}>
+                {level}
+              </option>
+            ))}
+          </select>
+        ) : null}
+      </div>
 
       <div className="change-settings-note" style={{ color: theme.textMuted, marginTop: 6 }}>
         {installed

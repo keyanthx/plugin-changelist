@@ -68,6 +68,13 @@ export interface Settings {
   improveCli: AgentCliId;
   /** Model for the ✨ Improve call, in that CLI's own naming. */
   improveModel: string;
+  /**
+   * Reasoning effort for ✨ Improve. Empty means "the CLI's default".
+   *
+   * Improve is the one place OpenCode's effort flag actually works, since it
+   * runs headlessly — see `AgentCli.effort.scope` in `agents.ts`.
+   */
+  improveEffort: string;
 }
 
 /**
@@ -95,6 +102,7 @@ export const DEFAULT_SETTINGS: Settings = {
   branchPrefix: '',
   improveCli: 'claude',
   improveModel: 'haiku',
+  improveEffort: '',
 };
 
 export function emptyStored(): Stored {
@@ -173,6 +181,7 @@ export function readStored(raw: unknown): Stored {
       branchPrefix: asString(storedSettings.branchPrefix, DEFAULT_SETTINGS.branchPrefix),
       improveCli: storedSettings.improveCli === 'opencode' ? 'opencode' : 'claude',
       improveModel: asString(storedSettings.improveModel, DEFAULT_SETTINGS.improveModel),
+      improveEffort: asString(storedSettings.improveEffort, DEFAULT_SETTINGS.improveEffort),
     },
   };
 }
