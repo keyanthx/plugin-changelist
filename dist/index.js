@@ -1328,93 +1328,6 @@ function fillSkeleton(template, title) {
   if (!trimmed) return template.skeleton;
   return template.skeleton.replace(/<[^>]+>/, trimmed);
 }
-const CONTAINING_BLOCK_PROPS = ["transform", "filter", "perspective", "contain", "backdropFilter"];
-function describeElement(element) {
-  const id = element.id ? `#${element.id}` : "";
-  const classes = typeof element.className === "string" && element.className.trim() ? "." + element.className.trim().split(/\s+/).slice(0, 3).join(".") : "";
-  return `${element.tagName.toLowerCase()}${id}${classes}`.slice(0, 60);
-}
-function rectOf(element) {
-  const r = element.getBoundingClientRect();
-  return {
-    top: Math.round(r.top),
-    left: Math.round(r.left),
-    width: Math.round(r.width),
-    height: Math.round(r.height),
-    bottom: Math.round(r.bottom)
-  };
-}
-function containingBlockAncestors(start) {
-  const found = [];
-  let node = start.parentElement;
-  while (node && node !== document.documentElement) {
-    const style = getComputedStyle(node);
-    for (const prop of CONTAINING_BLOCK_PROPS) {
-      const value = style[prop];
-      if (value && value !== "none" && value !== "normal") {
-        found.push(`${describeElement(node)} { ${prop}: ${value.slice(0, 40)} }`);
-        break;
-      }
-    }
-    node = node.parentElement;
-  }
-  return found;
-}
-function collectDiagnostics() {
-  const frame = document.querySelector(".change-frame");
-  const body = document.querySelector(".change-frame-body");
-  if (!frame || !body) return "Change List: panel is not open, so there is nothing to measure.";
-  const frameStyle = getComputedStyle(frame);
-  const bodyStyle = getComputedStyle(body);
-  const overflows = body.scrollHeight > body.clientHeight + 1;
-  const canScroll = bodyStyle.overflowY === "auto" || bodyStyle.overflowY === "scroll";
-  const runsOffScreen = frame.getBoundingClientRect().bottom > window.innerHeight + 1;
-  const verdict = !overflows ? "Content fits — nothing to scroll. If text looks cut off, the panel is sized wrong, not unscrollable." : !canScroll ? `BLOCKED: content overflows by ${body.scrollHeight - body.clientHeight}px but computed overflow-y is "${bodyStyle.overflowY}" — the host stylesheet is overriding ours.` : runsOffScreen ? "Scrollable, but the panel extends below the window — a positioning problem." : "Healthy: content overflows and the container is scrollable.";
-  const payload = {
-    verdict,
-    viewport: { width: window.innerWidth, height: window.innerHeight },
-    devicePixelRatio: window.devicePixelRatio,
-    mode: frame.classList.contains("change-frame-pinned") ? "pinned" : "window",
-    frame: {
-      rect: rectOf(frame),
-      position: frameStyle.position,
-      height: frameStyle.height,
-      maxHeight: frameStyle.maxHeight,
-      overflow: frameStyle.overflow,
-      display: frameStyle.display,
-      flexDirection: frameStyle.flexDirection,
-      // If this exceeds the viewport height, the bottom of the panel is
-      // off-screen and no amount of scrolling inside it will help.
-      extendsBelowViewport: frame.getBoundingClientRect().bottom > window.innerHeight + 1
-    },
-    body: {
-      rect: rectOf(body),
-      clientHeight: body.clientHeight,
-      scrollHeight: body.scrollHeight,
-      scrollTop: body.scrollTop,
-      overflowY: bodyStyle.overflowY,
-      flex: `${bodyStyle.flexGrow} ${bodyStyle.flexShrink} ${bodyStyle.flexBasis}`,
-      minHeight: bodyStyle.minHeight,
-      // The single most telling number: false means there is nothing to scroll,
-      // which points at sizing rather than at the scroll gesture.
-      contentOverflows: body.scrollHeight > body.clientHeight + 1,
-      maxScrollTop: Math.max(0, body.scrollHeight - body.clientHeight)
-    },
-    // Non-empty means `position: fixed` is not resolving against the viewport.
-    containingBlockAncestors: containingBlockAncestors(frame),
-    scrollableAncestorsOfBody: (() => {
-      const chain = [];
-      let node = body.parentElement;
-      while (node && chain.length < 6) {
-        const s = getComputedStyle(node);
-        chain.push(`${describeElement(node)} { overflow:${s.overflow}; height:${s.height} }`);
-        node = node.parentElement;
-      }
-      return chain;
-    })()
-  };
-  return JSON.stringify(payload, null, 2);
-}
 const ShipReact$5 = window.__SHIPSTUDIO_REACT__;
 function Modal({
   title,
@@ -1522,7 +1435,7 @@ function PanelFrame({
         onMouseDown: startDrag
       },
       /* @__PURE__ */ ShipReact$5.createElement("span", { className: "change-frame-title" }, title),
-      /* @__PURE__ */ ShipReact$5.createElement("span", { className: "change-header-actions" }, headerExtra, /* @__PURE__ */ ShipReact$5.createElement(DiagnosticsButton, null), /* @__PURE__ */ ShipReact$5.createElement(PinButton, null), /* @__PURE__ */ ShipReact$5.createElement(
+      /* @__PURE__ */ ShipReact$5.createElement("span", { className: "change-header-actions" }, headerExtra, /* @__PURE__ */ ShipReact$5.createElement(PinButton, null), /* @__PURE__ */ ShipReact$5.createElement(
         "button",
         {
           className: "change-close",
@@ -1594,26 +1507,6 @@ function getFrameOrigin(headerElement) {
   const frame = headerElement.closest(".change-frame");
   const rect = (frame ?? headerElement).getBoundingClientRect();
   return { x: rect.left, y: rect.top };
-}
-function DiagnosticsButton() {
-  const theme = useTheme();
-  const [copied, setCopied] = useState(false);
-  return /* @__PURE__ */ ShipReact$5.createElement(
-    "button",
-    {
-      className: "change-icon-btn",
-      style: { color: copied ? theme.success : theme.textMuted },
-      title: "Copy a layout diagnostic snapshot to the clipboard",
-      "aria-label": "Copy layout diagnostics",
-      onClick: () => {
-        void copyText(collectDiagnostics()).then((ok) => {
-          setCopied(ok);
-          window.setTimeout(() => setCopied(false), 2e3);
-        });
-      }
-    },
-    copied ? "✓" : "🩺"
-  );
 }
 function PinButton() {
   const theme = useTheme();
@@ -2098,6 +1991,93 @@ function ModeButton({
     /* @__PURE__ */ ShipReact$2.createElement("span", { style: { color: theme.textMuted, fontSize: 10.5 } }, detail)
   );
 }
+const CONTAINING_BLOCK_PROPS = ["transform", "filter", "perspective", "contain", "backdropFilter"];
+function describeElement(element) {
+  const id = element.id ? `#${element.id}` : "";
+  const classes = typeof element.className === "string" && element.className.trim() ? "." + element.className.trim().split(/\s+/).slice(0, 3).join(".") : "";
+  return `${element.tagName.toLowerCase()}${id}${classes}`.slice(0, 60);
+}
+function rectOf(element) {
+  const r = element.getBoundingClientRect();
+  return {
+    top: Math.round(r.top),
+    left: Math.round(r.left),
+    width: Math.round(r.width),
+    height: Math.round(r.height),
+    bottom: Math.round(r.bottom)
+  };
+}
+function containingBlockAncestors(start) {
+  const found = [];
+  let node = start.parentElement;
+  while (node && node !== document.documentElement) {
+    const style = getComputedStyle(node);
+    for (const prop of CONTAINING_BLOCK_PROPS) {
+      const value = style[prop];
+      if (value && value !== "none" && value !== "normal") {
+        found.push(`${describeElement(node)} { ${prop}: ${value.slice(0, 40)} }`);
+        break;
+      }
+    }
+    node = node.parentElement;
+  }
+  return found;
+}
+function collectDiagnostics() {
+  const frame = document.querySelector(".change-frame");
+  const body = document.querySelector(".change-frame-body");
+  if (!frame || !body) return "Change List: panel is not open, so there is nothing to measure.";
+  const frameStyle = getComputedStyle(frame);
+  const bodyStyle = getComputedStyle(body);
+  const overflows = body.scrollHeight > body.clientHeight + 1;
+  const canScroll = bodyStyle.overflowY === "auto" || bodyStyle.overflowY === "scroll";
+  const runsOffScreen = frame.getBoundingClientRect().bottom > window.innerHeight + 1;
+  const verdict = !overflows ? "Content fits — nothing to scroll. If text looks cut off, the panel is sized wrong, not unscrollable." : !canScroll ? `BLOCKED: content overflows by ${body.scrollHeight - body.clientHeight}px but computed overflow-y is "${bodyStyle.overflowY}" — the host stylesheet is overriding ours.` : runsOffScreen ? "Scrollable, but the panel extends below the window — a positioning problem." : "Healthy: content overflows and the container is scrollable.";
+  const payload = {
+    verdict,
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    devicePixelRatio: window.devicePixelRatio,
+    mode: frame.classList.contains("change-frame-pinned") ? "pinned" : "window",
+    frame: {
+      rect: rectOf(frame),
+      position: frameStyle.position,
+      height: frameStyle.height,
+      maxHeight: frameStyle.maxHeight,
+      overflow: frameStyle.overflow,
+      display: frameStyle.display,
+      flexDirection: frameStyle.flexDirection,
+      // If this exceeds the viewport height, the bottom of the panel is
+      // off-screen and no amount of scrolling inside it will help.
+      extendsBelowViewport: frame.getBoundingClientRect().bottom > window.innerHeight + 1
+    },
+    body: {
+      rect: rectOf(body),
+      clientHeight: body.clientHeight,
+      scrollHeight: body.scrollHeight,
+      scrollTop: body.scrollTop,
+      overflowY: bodyStyle.overflowY,
+      flex: `${bodyStyle.flexGrow} ${bodyStyle.flexShrink} ${bodyStyle.flexBasis}`,
+      minHeight: bodyStyle.minHeight,
+      // The single most telling number: false means there is nothing to scroll,
+      // which points at sizing rather than at the scroll gesture.
+      contentOverflows: body.scrollHeight > body.clientHeight + 1,
+      maxScrollTop: Math.max(0, body.scrollHeight - body.clientHeight)
+    },
+    // Non-empty means `position: fixed` is not resolving against the viewport.
+    containingBlockAncestors: containingBlockAncestors(frame),
+    scrollableAncestorsOfBody: (() => {
+      const chain = [];
+      let node = body.parentElement;
+      while (node && chain.length < 6) {
+        const s = getComputedStyle(node);
+        chain.push(`${describeElement(node)} { overflow:${s.overflow}; height:${s.height} }`);
+        node = node.parentElement;
+      }
+      return chain;
+    })()
+  };
+  return JSON.stringify(payload, null, 2);
+}
 const ShipReact$1 = window.__SHIPSTUDIO_REACT__;
 const DIFFICULTIES = ["easy", "normal", "hard"];
 function binaryOf(command) {
@@ -2343,7 +2323,26 @@ function LayoutDiagnostics() {
       onClick: () => restoreHostLayout()
     },
     "Undo layout change"
-  )), /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-note", style: { color: theme.textMuted, marginTop: 8 } }, "The dock resizes Ship Studio’s content area so nothing is covered. Drag the dock’s left edge to change its width. Everything is put back when you unpin."));
+  ), /* @__PURE__ */ ShipReact$1.createElement(CopyDiagnosticsButton, null)), /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-note", style: { color: theme.textMuted, marginTop: 8 } }, "The dock resizes Ship Studio’s content area so nothing is covered. Drag the dock’s left edge to change its width. Everything is put back when you unpin."));
+}
+function CopyDiagnosticsButton() {
+  const theme = useTheme();
+  const [copied, setCopied] = useState(false);
+  return /* @__PURE__ */ ShipReact$1.createElement(
+    "button",
+    {
+      className: "change-btn",
+      style: { background: "transparent", color: copied ? theme.success : theme.textMuted, border: `1px solid ${theme.border}` },
+      title: "Copy a layout snapshot to the clipboard, for reporting a display bug",
+      onClick: () => {
+        void copyText(collectDiagnostics()).then((ok) => {
+          setCopied(ok);
+          window.setTimeout(() => setCopied(false), 2e3);
+        });
+      }
+    },
+    copied ? "Copied" : "Copy diagnostics"
+  );
 }
 function ImproveSettings({
   settings,

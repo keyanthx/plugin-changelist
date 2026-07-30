@@ -8,9 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { copyText } from '../clipboard.ts';
 import { useTheme } from '../context.ts';
-import { collectDiagnostics } from '../diagnostics.ts';
 import {
   MAX_DOCK_WIDTH,
   MIN_DOCK_WIDTH,
@@ -195,7 +193,6 @@ export function PanelFrame({
         <span className="change-frame-title">{title}</span>
         <span className="change-header-actions">
           {headerExtra}
-          <DiagnosticsButton />
           <PinButton />
           <button
             className="change-close"
@@ -326,35 +323,6 @@ function getFrameOrigin(headerElement: HTMLElement): { x: number; y: number } {
   const frame = headerElement.closest('.change-frame') as HTMLElement | null;
   const rect = (frame ?? headerElement).getBoundingClientRect();
   return { x: rect.left, y: rect.top };
-}
-
-/**
- * Copies a layout snapshot for pasting into a bug report.
- *
- * Lives in the header rather than in Settings on purpose: the bug it exists to
- * diagnose is "Settings won't scroll", so anything buried at the bottom of
- * Settings would be exactly the thing you can't reach.
- */
-function DiagnosticsButton() {
-  const theme = useTheme();
-  const [copied, setCopied] = useState(false);
-
-  return (
-    <button
-      className="change-icon-btn"
-      style={{ color: copied ? theme.success : theme.textMuted }}
-      title="Copy a layout diagnostic snapshot to the clipboard"
-      aria-label="Copy layout diagnostics"
-      onClick={() => {
-        void copyText(collectDiagnostics()).then((ok) => {
-          setCopied(ok);
-          window.setTimeout(() => setCopied(false), 2000);
-        });
-      }}
-    >
-      {copied ? '✓' : '🩺'}
-    </button>
-  );
 }
 
 function PinButton() {

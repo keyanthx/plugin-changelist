@@ -16,7 +16,9 @@ import {
   withModel,
   type AgentCli,
 } from '../agents.ts';
+import { copyText } from '../clipboard.ts';
 import { useTheme } from '../context.ts';
+import { collectDiagnostics } from '../diagnostics.ts';
 import { useDock } from '../dock.ts';
 import { applyHostLayout, getLayoutReport, restoreHostLayout, subscribeLayout } from '../hostLayout.ts';
 import { DIFFICULTY_LABELS, type Difficulty, type Settings } from '../model.ts';
@@ -394,6 +396,7 @@ function LayoutDiagnostics() {
         >
           Undo layout change
         </button>
+        <CopyDiagnosticsButton />
       </div>
 
       <div className="change-settings-note" style={{ color: theme.textMuted, marginTop: 8 }}>
@@ -401,6 +404,35 @@ function LayoutDiagnostics() {
         left edge to change its width. Everything is put back when you unpin.
       </div>
     </Field>
+  );
+}
+
+/**
+ * Copies a layout snapshot for a bug report.
+ *
+ * Ship Studio has no devtools, so this is the only way to see what the panel is
+ * actually doing. It earned its place: it's what identified the host stylesheet
+ * forcing `overflow-y: hidden` on the panel body, after two wrong guesses.
+ * Tucked into Settings rather than the panel header, where it was clutter.
+ */
+function CopyDiagnosticsButton() {
+  const theme = useTheme();
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <button
+      className="change-btn"
+      style={{ background: 'transparent', color: copied ? theme.success : theme.textMuted, border: `1px solid ${theme.border}` }}
+      title="Copy a layout snapshot to the clipboard, for reporting a display bug"
+      onClick={() => {
+        void copyText(collectDiagnostics()).then((ok) => {
+          setCopied(ok);
+          window.setTimeout(() => setCopied(false), 2000);
+        });
+      }}
+    >
+      {copied ? 'Copied' : 'Copy diagnostics'}
+    </button>
   );
 }
 
