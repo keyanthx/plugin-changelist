@@ -8,7 +8,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { copyText } from '../clipboard.ts';
 import { useTheme } from '../context.ts';
+import { collectDiagnostics } from '../diagnostics.ts';
 import {
   MAX_DOCK_WIDTH,
   MIN_DOCK_WIDTH,
@@ -150,8 +152,29 @@ export function PanelFrame({
    */
   const contentTop = useContentTop();
 
+  const viewportHeight = useViewportHeight();
+
+  /**
+   * The dock's height is set explicitly rather than via `bottom: 0`.
+   *
+   * `position: fixed` only resolves against the viewport while no ancestor
+   * establishes a containing block — and `transform`, `filter`, `perspective`
+   * and `contain` all do. Inside a host we don't control, `bottom: 0` can
+   * therefore resolve against some inner element instead, making the frame far
+   * taller than the screen: the body then never overflows, so it never scrolls,
+   * and its lower half sits below the window unreachable.
+   *
+   * A pixel height derived from `window.innerHeight` doesn't care about any of
+   * that. `maxHeight` on the floating window is already viewport-relative (vh),
+   * so it was never exposed to the same problem.
+   */
   const frameStyle: React.CSSProperties = pinned
-    ? { width: getEffectiveDockWidth(), right: 0, top: contentTop, bottom: 0 }
+    ? {
+        width: getEffectiveDockWidth(),
+        right: 0,
+        top: contentTop,
+        height: Math.max(160, viewportHeight - contentTop),
+      }
     : { width: 380, left: dock.x, top: dock.y, maxHeight: 'min(70vh, 620px)' };
 
   return (
@@ -172,6 +195,7 @@ export function PanelFrame({
         <span className="change-frame-title">{title}</span>
         <span className="change-header-actions">
           {headerExtra}
+          <DiagnosticsButton />
           <PinButton />
           <button
             className="change-close"
@@ -242,6 +266,17 @@ function useWheelFallback(ref: React.RefObject<HTMLDivElement | null>) {
   }, [ref]);
 }
 
+/** The viewport height, kept current across window resizes. */
+function useViewportHeight(): number {
+  const [height, setHeight] = useState(() => window.innerHeight);
+  useEffect(() => {
+    const onResize = () => setHeight(window.innerHeight);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return height;
+}
+
 /** Subscribes to the measured top of the app's content region. */
 function useContentTop(): number {
   const [top, setTop] = useState(() => getLayoutReport().contentTop);
@@ -291,6 +326,35 @@ function getFrameOrigin(headerElement: HTMLElement): { x: number; y: number } {
   const frame = headerElement.closest('.change-frame') as HTMLElement | null;
   const rect = (frame ?? headerElement).getBoundingClientRect();
   return { x: rect.left, y: rect.top };
+}
+
+/**
+ * Copies a layout snapshot for pasting into a bug report.
+ *
+ * Lives in the header rather than in Settings on purpose: the bug it exists to
+ * diagnose is "Settings won't scroll", so anything buried at the bottom of
+ * Settings would be exactly the thing you can't reach.
+ */
+function DiagnosticsButton() {
+  const theme = useTheme();
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <button
+      className="change-icon-btn"
+      style={{ color: copied ? theme.success : theme.textMuted }}
+      title="Copy a layout diagnostic snapshot to the clipboard"
+      aria-label="Copy layout diagnostics"
+      onClick={() => {
+        void copyText(collectDiagnostics()).then((ok) => {
+          setCopied(ok);
+          window.setTimeout(() => setCopied(false), 2000);
+        });
+      }}
+    >
+      {copied ? '✓' : '🩺'}
+    </button>
+  );
 }
 
 function PinButton() {
