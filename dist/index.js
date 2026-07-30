@@ -719,6 +719,9 @@ const CSS = `
   font-size: 13px;
   line-height: 1.5;
   flex: 1;
+  /* Keep scrolling inside the panel: without this, reaching the end chains the
+     gesture to whatever is behind us and scrolls Ship Studio instead. */
+  overscroll-behavior: contain;
 }
 
 /* ---------------------------------------------------------------- modal */
@@ -764,6 +767,7 @@ const CSS = `
   overflow-y: auto;
   font-size: 13px;
   line-height: 1.5;
+  overscroll-behavior: contain;
 }
 
 .change-close {
@@ -1348,6 +1352,8 @@ function PanelFrame({
   const dock = useDock();
   const pinned = dock.mode === "pinned";
   const dragOffset = useRef(null);
+  const bodyRef = useRef(null);
+  useWheelFallback(bodyRef);
   useEffect(() => {
     if (pinned) return;
     const onKey = (event) => {
@@ -1409,9 +1415,23 @@ function PanelFrame({
         "✕"
       ))
     ),
-    /* @__PURE__ */ ShipReact$5.createElement("div", { className: "change-frame-body" }, children),
+    /* @__PURE__ */ ShipReact$5.createElement("div", { className: "change-frame-body", ref: bodyRef }, children),
     pinned ? /* @__PURE__ */ ShipReact$5.createElement(DockResizeHandle, null) : null
   );
+}
+function useWheelFallback(ref) {
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const onWheel = (event) => {
+      const canScroll = event.deltaY > 0 ? element.scrollTop < element.scrollHeight - element.clientHeight - 1 : element.scrollTop > 0;
+      if (!canScroll) return;
+      if (event.defaultPrevented) element.scrollTop += event.deltaY;
+      event.stopPropagation();
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, [ref]);
 }
 function useContentTop() {
   const [top, setTop] = useState(() => getLayoutReport().contentTop);

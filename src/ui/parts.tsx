@@ -99,6 +99,9 @@ export function PanelFrame({
   /** Drag offset between the pointer and the window's top-left corner. */
   const dragOffset = useRef<{ dx: number; dy: number } | null>(null);
 
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useWheelFallback(bodyRef);
+
   useEffect(() => {
     // Escape closes the floating window, but never the pinned dock — the dock
     // is furniture, and Escape is for dismissing transient things.
@@ -180,10 +183,63 @@ export function PanelFrame({
           </button>
         </span>
       </div>
-      <div className="change-frame-body">{children}</div>
+      <div className="change-frame-body" ref={bodyRef}>
+        {children}
+      </div>
       {pinned ? <DockResizeHandle /> : null}
     </div>
   );
+}
+
+/**
+ * Keep the panel scrollable even if the host swallows wheel events.
+ *
+ * Ship Studio is a Tauri app, and desktop webviews commonly attach a global
+ * `wheel` listener that calls `preventDefault()` for anything outside their own
+ * scroll containers, to stop macOS rubber-banding. Our panel isn't one of
+ * theirs, so the gesture can be cancelled before it ever scrolls us — which is
+ * how a container with a perfectly good `overflow-y: auto` ends up feeling
+ * frozen.
+ *
+ * It defends against both shapes that problem takes, synchronously — no timers
+ * and no "did it move?" probing. An earlier attempt did probe on the next
+ * animation frame, and it was wrong: the browser hasn't necessarily applied its
+ * own scroll by then, so a healthy environment looked broken and the handler
+ * scrolled a second time on top of the native one.
+ *
+ * 1. **Host listens in the bubble phase** (the common case): our
+ *    `stopPropagation` means their handler never runs, so it can't cancel
+ *    anything. We do *not* call `preventDefault`, so the browser scrolls us
+ *    natively — momentum and smoothness intact.
+ * 2. **Host listens in the capture phase**: theirs already ran, and
+ *    `defaultPrevented` tells us so synchronously. Only then do we move the
+ *    scroll position ourselves, because nothing else is going to.
+ */
+function useWheelFallback(ref: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    const onWheel = (event: WheelEvent) => {
+      const canScroll =
+        event.deltaY > 0
+          ? element.scrollTop < element.scrollHeight - element.clientHeight - 1
+          : element.scrollTop > 0;
+
+      // Nothing to scroll here — let it chain out normally.
+      if (!canScroll) return;
+
+      // Case 2: something upstream already cancelled the native scroll.
+      if (event.defaultPrevented) element.scrollTop += event.deltaY;
+
+      // Case 1: keep it away from a host handler that would cancel it.
+      event.stopPropagation();
+    };
+
+    // `passive: false` so the browser doesn't assume we'll never interfere.
+    element.addEventListener('wheel', onWheel, { passive: false });
+    return () => element.removeEventListener('wheel', onWheel);
+  }, [ref]);
 }
 
 /** Subscribes to the measured top of the app's content region. */

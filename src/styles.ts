@@ -89,6 +89,9 @@ export const CSS = `
   font-size: 13px;
   line-height: 1.5;
   flex: 1;
+  /* Keep scrolling inside the panel: without this, reaching the end chains the
+     gesture to whatever is behind us and scrolls Ship Studio instead. */
+  overscroll-behavior: contain;
 }
 
 /* ---------------------------------------------------------------- modal */
@@ -134,6 +137,7 @@ export const CSS = `
   overflow-y: auto;
   font-size: 13px;
   line-height: 1.5;
+  overscroll-behavior: contain;
 }
 
 .change-close {
