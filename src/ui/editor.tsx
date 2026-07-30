@@ -221,14 +221,14 @@ export function ItemEditor({
       </div>
 
       {/*
-       * The boxes sit in their own bordered panel with an accent edge matching
-       * the highlighted chip above, so it reads as "these belong to Style"
-       * rather than as five loose inputs that happen to follow it.
+       * The boxes sit in their own panel outlined in the same accent as the
+       * highlighted chip above, so it reads as "these belong to Style" rather
+       * than as five loose inputs that happen to follow it.
        */}
       {template ? (
         <div
           className="change-fields"
-          style={{ borderColor: theme.border, borderLeftColor: theme.accent }}
+          style={{ borderColor: theme.accent }}
           role="group"
           aria-label={`${template.label} template fields`}
         >

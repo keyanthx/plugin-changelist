@@ -1186,10 +1186,11 @@ const CSS = `
 /*
  * The template's boxes, in a panel of their own.
  *
- * The border groups them so they read as "these belong to the active tag"
- * rather than five loose inputs that happen to follow it, and the thicker left
- * edge is tinted with the same accent as the highlighted chip above, tying the
- * two together.
+ * Deliberately the same recipe as the active chip above — a thin accent outline
+ * over a faint neutral tint — so the two visually rhyme and the panel reads as
+ * "these belong to Style" rather than five loose inputs that happen to follow
+ * it. A blue *fill* was the alternative, but it would compete with the input
+ * boxes sitting inside it, which carry their own background.
  */
 .change-fields {
   display: flex;
@@ -1198,7 +1199,6 @@ const CSS = `
   min-width: 0;
   padding: 10px;
   border: 1px solid;
-  border-left-width: 2px;
   border-radius: 8px;
   background: rgba(127, 127, 127, 0.05);
 }
@@ -2118,7 +2118,7 @@ function ItemEditor({
     "div",
     {
       className: "change-fields",
-      style: { borderColor: theme.border, borderLeftColor: theme.accent },
+      style: { borderColor: theme.accent },
       role: "group",
       "aria-label": `${template.label} template fields`
     },
