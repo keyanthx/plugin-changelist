@@ -68,7 +68,25 @@ export function collectDiagnostics(): string {
   const frameStyle = getComputedStyle(frame);
   const bodyStyle = getComputedStyle(body);
 
+  const overflows = body.scrollHeight > body.clientHeight + 1;
+  const canScroll = bodyStyle.overflowY === 'auto' || bodyStyle.overflowY === 'scroll';
+  const runsOffScreen = frame.getBoundingClientRect().bottom > window.innerHeight + 1;
+
+  /**
+   * A plain-language answer, so reading this doesn't mean spotting one field
+   * among thirty. The `overflow-y: hidden` case is called out by name because
+   * it looks healthy everywhere else and cost three attempts to find.
+   */
+  const verdict = !overflows
+    ? 'Content fits — nothing to scroll. If text looks cut off, the panel is sized wrong, not unscrollable.'
+    : !canScroll
+      ? `BLOCKED: content overflows by ${body.scrollHeight - body.clientHeight}px but computed overflow-y is "${bodyStyle.overflowY}" — the host stylesheet is overriding ours.`
+      : runsOffScreen
+        ? 'Scrollable, but the panel extends below the window — a positioning problem.'
+        : 'Healthy: content overflows and the container is scrollable.';
+
   const payload = {
+    verdict,
     viewport: { width: window.innerWidth, height: window.innerHeight },
     devicePixelRatio: window.devicePixelRatio,
 

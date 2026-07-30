@@ -715,13 +715,38 @@ const CSS = `
 
 .change-frame-body {
   padding: 12px 13px 16px;
-  overflow-y: auto;
   font-size: 13px;
   line-height: 1.5;
   flex: 1;
   /* Keep scrolling inside the panel: without this, reaching the end chains the
      gesture to whatever is behind us and scrolls Ship Studio instead. */
   overscroll-behavior: contain;
+}
+
+/*
+ * Scrolling, defended against the host's stylesheet.
+ *
+ * The panel is drawn from the publish slot, so it is a DOM descendant of
+ * header.workspace-header even though position:fixed paints it elsewhere.
+ * Ship Studio's header styles therefore apply to it, and a header sensibly says
+ * nothing inside it scrolls — a rule such as ".workspace-header-right div"
+ * scores (0,1,1) and beats a bare ".change-frame-body" at (0,1,0), forcing our
+ * containers to overflow-y: hidden. Measured in the real app: content
+ * overflowed by 254px while computed overflow-y was "hidden", so there was
+ * genuinely nothing the user could do.
+ *
+ * The child combinator raises specificity, and !important covers the case where
+ * the host rule is itself important. !important is normally a smell; here it is
+ * the right tool, because we are protecting our own component's behaviour
+ * inside a subtree whose CSS we neither control nor can anticipate.
+ *
+ * (Note for future edits: this file is one big template literal — backticks in
+ * these comments would end the string.)
+ */
+.change-frame > .change-frame-body,
+.change-overlay .change-modal-body {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
 }
 
 /* ---------------------------------------------------------------- modal */
@@ -764,10 +789,10 @@ const CSS = `
 
 .change-modal-body {
   padding: 14px 16px 18px;
-  overflow-y: auto;
   font-size: 13px;
   line-height: 1.5;
   overscroll-behavior: contain;
+  /* Its overflow-y is set by the defended rule above, alongside the panel's. */
 }
 
 .change-close {
@@ -1341,7 +1366,12 @@ function collectDiagnostics() {
   if (!frame || !body) return "Change List: panel is not open, so there is nothing to measure.";
   const frameStyle = getComputedStyle(frame);
   const bodyStyle = getComputedStyle(body);
+  const overflows = body.scrollHeight > body.clientHeight + 1;
+  const canScroll = bodyStyle.overflowY === "auto" || bodyStyle.overflowY === "scroll";
+  const runsOffScreen = frame.getBoundingClientRect().bottom > window.innerHeight + 1;
+  const verdict = !overflows ? "Content fits — nothing to scroll. If text looks cut off, the panel is sized wrong, not unscrollable." : !canScroll ? `BLOCKED: content overflows by ${body.scrollHeight - body.clientHeight}px but computed overflow-y is "${bodyStyle.overflowY}" — the host stylesheet is overriding ours.` : runsOffScreen ? "Scrollable, but the panel extends below the window — a positioning problem." : "Healthy: content overflows and the container is scrollable.";
   const payload = {
+    verdict,
     viewport: { width: window.innerWidth, height: window.innerHeight },
     devicePixelRatio: window.devicePixelRatio,
     mode: frame.classList.contains("change-frame-pinned") ? "pinned" : "window",
