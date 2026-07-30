@@ -173,6 +173,8 @@ export const CSS = `
 .change-frame .change-row-main,
 .change-frame .change-picker-row,
 .change-frame .change-button-row,
+.change-frame .change-tag-head,
+.change-frame .change-tag-box-row,
 .change-frame .change-templates {
   display: flex !important;
   flex-direction: row !important;
@@ -181,6 +183,9 @@ export const CSS = `
 .change-frame .change-settings,
 .change-frame .change-fields,
 .change-frame .change-field,
+.change-frame .change-tag-list,
+.change-frame .change-tag-card,
+.change-frame .change-tag-boxes,
 .change-frame .change-editor,
 .change-frame .change-popover-body,
 .change-frame .change-settings-grid {
@@ -646,6 +651,43 @@ export const CSS = `
 /* ------------------------------------------------------------- settings */
 
 .change-settings { display: flex; flex-direction: column; gap: 16px; }
+
+/* --------------------------------------------------- your own tags */
+
+.change-tag-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+.change-tag-card {
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  background: rgba(127, 127, 127, 0.05);
+}
+
+/* Name, a boxes toggle, and delete — the whole tag in one row when collapsed. */
+.change-tag-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.change-tag-boxes { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+/* One box: its name, an optional example, and a way to remove it. Wraps rather
+   than squeezing, so a 260px dock stacks the two inputs instead of clipping. */
+.change-tag-box-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.change-tag-box-row .change-input { flex: 1 1 110px; }
 .change-settings-note { font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
 .change-settings-grid { display: flex; flex-direction: column; gap: 9px; }
 .change-settings-row { display: flex; align-items: center; gap: 9px; min-width: 0; }

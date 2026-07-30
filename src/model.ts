@@ -23,7 +23,10 @@ export type Status = 'todo' | 'doing' | 'done';
  * item saved under an old id reads back without losing its template — see
  * `readTemplateId`.
  */
-export type TemplateId = 'style' | 'text' | 'layout' | 'add' | 'behaviour' | 'bug';
+export type TemplateId = string;
+
+/** The tags that ship with the plugin. Custom ones are prefixed `custom:`. */
+export const BUILT_IN_TEMPLATE_IDS = ['style', 'text', 'layout', 'add', 'behaviour', 'bug'] as const;
 
 export interface ChangeItem {
   id: string;
@@ -146,8 +149,6 @@ function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
-const TEMPLATE_IDS: TemplateId[] = ['style', 'text', 'layout', 'add', 'behaviour', 'bug'];
-
 /**
  * Tags that used to exist, mapped to where their work now lives.
  *
@@ -162,12 +163,16 @@ const RETIRED_TEMPLATE_IDS: Record<string, TemplateId | null> = {
   refactor: null,
 };
 
+/**
+ * Any non-empty id is kept, because a custom tag's id is only known at runtime.
+ * An id that no longer resolves to a tag falls back to free text when rendered,
+ * which is what should happen if you delete a tag an item was using.
+ */
 function readTemplateId(value: unknown): TemplateId | null {
   const id = asString(value);
   if (!id) return null;
-  if ((TEMPLATE_IDS as string[]).includes(id)) return id as TemplateId;
   if (id in RETIRED_TEMPLATE_IDS) return RETIRED_TEMPLATE_IDS[id];
-  return null;
+  return id;
 }
 
 /** Keep only the string entries; a malformed value shouldn't poison the form. */

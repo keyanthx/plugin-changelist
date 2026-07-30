@@ -257,13 +257,12 @@ function emptyStored() {
 }
 const DIFFICULTIES$2 = ["easy", "normal", "hard"];
 const STATUSES = ["todo", "doing", "done"];
-function isRecord(value) {
+function isRecord$1(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function asString(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
-const TEMPLATE_IDS = ["style", "text", "layout", "add", "behaviour", "bug"];
 const RETIRED_TEMPLATE_IDS = {
   copy: "text",
   "new-section": "add",
@@ -272,9 +271,8 @@ const RETIRED_TEMPLATE_IDS = {
 function readTemplateId(value) {
   const id = asString(value);
   if (!id) return null;
-  if (TEMPLATE_IDS.includes(id)) return id;
   if (id in RETIRED_TEMPLATE_IDS) return RETIRED_TEMPLATE_IDS[id];
-  return null;
+  return id;
 }
 function readFields(raw) {
   const fields = {};
@@ -284,13 +282,13 @@ function readFields(raw) {
   return fields;
 }
 function readItem(value) {
-  if (!isRecord(value)) return null;
+  if (!isRecord$1(value)) return null;
   const id = asString(value.id);
   if (!id) return null;
   const difficulty = value.difficulty;
   const status = value.status;
   const prompt = asString(value.prompt);
-  const fields = isRecord(value.fields) ? readFields(value.fields) : {};
+  const fields = isRecord$1(value.fields) ? readFields(value.fields) : {};
   const notes = typeof value.notes === "string" ? value.notes : prompt;
   return {
     id,
@@ -309,9 +307,9 @@ function readItem(value) {
   };
 }
 function readStored(raw) {
-  if (!isRecord(raw) || raw.schema !== 1 || !Array.isArray(raw.items)) return emptyStored();
-  const storedSettings = isRecord(raw.settings) ? raw.settings : {};
-  const storedCommands = isRecord(storedSettings.commands) ? storedSettings.commands : {};
+  if (!isRecord$1(raw) || raw.schema !== 1 || !Array.isArray(raw.items)) return emptyStored();
+  const storedSettings = isRecord$1(raw.settings) ? raw.settings : {};
+  const storedCommands = isRecord$1(storedSettings.commands) ? storedSettings.commands : {};
   return {
     schema: 1,
     items: raw.items.map(readItem).filter((item) => item !== null),
@@ -330,14 +328,14 @@ function readStored(raw) {
     }
   };
 }
-function newId() {
+function newId$1() {
   const cryptoApi = globalThis.crypto;
   if (cryptoApi == null ? void 0 : cryptoApi.randomUUID) return cryptoApi.randomUUID();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 function createItem(title, branchAtCapture) {
   return {
-    id: newId(),
+    id: newId$1(),
     title: title.trim(),
     prompt: "",
     fields: {},
@@ -404,7 +402,7 @@ function nextDifficulty(current) {
   const index = DIFFICULTIES$2.indexOf(current);
   return DIFFICULTIES$2[(index + 1) % DIFFICULTIES$2.length];
 }
-const STORAGE_KEY = "shipstudio-changelist-dock";
+const STORAGE_KEY$1 = "shipstudio-changelist-dock";
 const MIN_DOCK_WIDTH = 260;
 const MAX_DOCK_WIDTH = 720;
 function clampWidth(width) {
@@ -427,7 +425,7 @@ function defaultState() {
 function load() {
   const base = defaultState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(STORAGE_KEY$1);
     if (!raw) return base;
     const saved = JSON.parse(raw);
     return {
@@ -449,7 +447,7 @@ function emit() {
 }
 function persist() {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    window.localStorage.setItem(STORAGE_KEY$1, JSON.stringify(state));
   } catch {
   }
 }
@@ -705,6 +703,74 @@ function restoreHostLayout() {
     nudgeHostLayout();
   }
 }
+const STORAGE_KEY = "shipstudio-changelist-tags";
+const ID_PREFIX = "custom:";
+function newId(prefix) {
+  const cryptoApi = globalThis.crypto;
+  const unique = (cryptoApi == null ? void 0 : cryptoApi.randomUUID) ? cryptoApi.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10);
+  return `${prefix}${unique}`;
+}
+function createCustomTag() {
+  return { id: newId(ID_PREFIX), label: "", fields: [createField(), createField()] };
+}
+function createField() {
+  return { id: newId("f"), label: "", placeholder: "" };
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function readCustomTags(raw) {
+  if (!Array.isArray(raw)) return [];
+  const tags = [];
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue;
+    const id = typeof entry.id === "string" ? entry.id : "";
+    const label = typeof entry.label === "string" ? entry.label : "";
+    if (!id || !label.trim()) continue;
+    const fields = [];
+    if (Array.isArray(entry.fields)) {
+      for (const field of entry.fields) {
+        if (!isRecord(field)) continue;
+        const fieldId = typeof field.id === "string" ? field.id : "";
+        const fieldLabel = typeof field.label === "string" ? field.label : "";
+        if (!fieldId || !fieldLabel.trim()) continue;
+        fields.push({
+          id: fieldId,
+          label: fieldLabel,
+          placeholder: typeof field.placeholder === "string" ? field.placeholder : "",
+          multiline: field.multiline === true
+        });
+      }
+    }
+    tags.push({ id, label, fields });
+  }
+  return tags;
+}
+function loadCustomTags() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw ? readCustomTags(JSON.parse(raw)) : [];
+  } catch {
+    return [];
+  }
+}
+function saveCustomTags(tags) {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tags));
+  } catch {
+  }
+}
+function toTemplate(tag) {
+  return {
+    id: tag.id,
+    label: tag.label.trim() || "Untitled",
+    hint: `Your own tag — ${tag.fields.length} box${tag.fields.length === 1 ? "" : "es"}.`,
+    fields: tag.fields.filter((field) => field.label.trim().length > 0)
+  };
+}
+function isUsable(tag) {
+  return tag.label.trim().length > 0 && tag.fields.some((field) => field.label.trim().length > 0);
+}
 const STYLE_ID = "change-plugin-styles";
 const CSS = `
 @keyframes changeSpin { to { transform: rotate(360deg); } }
@@ -870,6 +936,8 @@ const CSS = `
 .change-frame .change-row-main,
 .change-frame .change-picker-row,
 .change-frame .change-button-row,
+.change-frame .change-tag-head,
+.change-frame .change-tag-box-row,
 .change-frame .change-templates {
   display: flex !important;
   flex-direction: row !important;
@@ -878,6 +946,9 @@ const CSS = `
 .change-frame .change-settings,
 .change-frame .change-fields,
 .change-frame .change-field,
+.change-frame .change-tag-list,
+.change-frame .change-tag-card,
+.change-frame .change-tag-boxes,
 .change-frame .change-editor,
 .change-frame .change-popover-body,
 .change-frame .change-settings-grid {
@@ -1343,6 +1414,43 @@ const CSS = `
 /* ------------------------------------------------------------- settings */
 
 .change-settings { display: flex; flex-direction: column; gap: 16px; }
+
+/* --------------------------------------------------- your own tags */
+
+.change-tag-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+.change-tag-card {
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  background: rgba(127, 127, 127, 0.05);
+}
+
+/* Name, a boxes toggle, and delete — the whole tag in one row when collapsed. */
+.change-tag-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.change-tag-boxes { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+/* One box: its name, an optional example, and a way to remove it. Wraps rather
+   than squeezing, so a 260px dock stacks the two inputs instead of clipping. */
+.change-tag-box-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.change-tag-box-row .change-input { flex: 1 1 110px; }
 .change-settings-note { font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
 .change-settings-grid { display: flex; flex-direction: column; gap: 9px; }
 .change-settings-row { display: flex; align-items: center; gap: 9px; min-width: 0; }
@@ -1667,9 +1775,12 @@ const TEMPLATES = [
     ]
   }
 ];
-function findTemplate(id) {
+function findTemplate(id, custom = []) {
   if (!id) return null;
-  return TEMPLATES.find((template) => template.id === id) ?? null;
+  return TEMPLATES.find((template) => template.id === id) ?? custom.find((template) => template.id === id) ?? null;
+}
+function allTemplates(custom = []) {
+  return [...TEMPLATES, ...custom];
 }
 function composePrompt(template, fields, notes) {
   const lines = [];
@@ -2019,6 +2130,7 @@ function ItemEditor({
   improveModel,
   improveEffort,
   improveAvailable,
+  customTemplates,
   canMoveUp,
   canMoveDown,
   onChange,
@@ -2037,7 +2149,7 @@ function ItemEditor({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
   const nudges = lintPrompt(item.prompt);
-  const template = findTemplate(item.template);
+  const template = findTemplate(item.template, customTemplates);
   const applyEdit = useCallback(
     (patch) => {
       const nextTemplateId = patch.template !== void 0 ? patch.template : item.template;
@@ -2045,10 +2157,10 @@ function ItemEditor({
       const nextNotes = patch.notes ?? item.notes;
       onChange({
         ...patch,
-        prompt: composePrompt(findTemplate(nextTemplateId), nextFields, nextNotes)
+        prompt: composePrompt(findTemplate(nextTemplateId, customTemplates), nextFields, nextNotes)
       });
     },
-    [item.fields, item.notes, item.template, onChange]
+    [customTemplates, item.fields, item.notes, item.template, onChange]
   );
   const setField = useCallback(
     (id, value) => applyEdit({ fields: { ...item.fields, [id]: value } }),
@@ -2122,7 +2234,7 @@ function ItemEditor({
       },
       DIFFICULTY_LABELS[difficulty]
     );
-  })), /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-templates" }, TEMPLATES.map((entry) => {
+  })), /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-templates" }, allTemplates(customTemplates).map((entry) => {
     const active = item.template === entry.id;
     return /* @__PURE__ */ ShipReact$3.createElement(
       "button",
@@ -2646,6 +2758,8 @@ function SettingsView({
   detectedPrefix,
   installedClis,
   shell,
+  customTags,
+  onCustomTagsChange,
   onChange
 }) {
   const theme = useTheme();
@@ -2861,7 +2975,128 @@ function SettingsView({
       claudeCaps,
       onChange
     }
-  ), /* @__PURE__ */ ShipReact$1.createElement(LayoutDiagnostics, null));
+  ), /* @__PURE__ */ ShipReact$1.createElement(CustomTagsSettings, { tags: customTags, onChange: onCustomTagsChange }), /* @__PURE__ */ ShipReact$1.createElement(LayoutDiagnostics, null));
+}
+function CustomTagsSettings({
+  tags,
+  onChange
+}) {
+  const theme = useTheme();
+  const [openId, setOpenId] = useState(null);
+  const inputStyle = {
+    background: theme.bgPrimary,
+    color: theme.textPrimary,
+    border: `1px solid ${theme.border}`
+  };
+  const patchTag = (id, patch) => onChange(tags.map((tag) => tag.id === id ? { ...tag, ...patch } : tag));
+  const patchField = (tagId, fieldId, patch) => onChange(
+    tags.map(
+      (tag) => tag.id === tagId ? {
+        ...tag,
+        fields: tag.fields.map(
+          (field) => field.id === fieldId ? { ...field, ...patch } : field
+        )
+      } : tag
+    )
+  );
+  const addTag = () => {
+    const tag = createCustomTag();
+    onChange([...tags, tag]);
+    setOpenId(tag.id);
+  };
+  return /* @__PURE__ */ ShipReact$1.createElement(Field, { label: "Your own tags" }, tags.length === 0 ? /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-note", style: { color: theme.textMuted, marginBottom: 8 } }, "A tag is a name and a few boxes to fill in. Make one for work you do often — an SEO pass, a client review — and it appears beside Style, Text and the rest.") : null, /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-tag-list" }, tags.map((tag) => {
+    const open = openId === tag.id;
+    return /* @__PURE__ */ ShipReact$1.createElement(
+      "div",
+      {
+        key: tag.id,
+        className: "change-tag-card",
+        style: { borderColor: open ? theme.accent : theme.border }
+      },
+      /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-tag-head" }, /* @__PURE__ */ ShipReact$1.createElement(
+        "input",
+        {
+          className: "change-input",
+          style: inputStyle,
+          value: tag.label,
+          placeholder: "Tag name, e.g. SEO",
+          spellCheck: false,
+          onChange: (event) => patchTag(tag.id, { label: event.target.value })
+        }
+      ), /* @__PURE__ */ ShipReact$1.createElement(
+        "button",
+        {
+          className: "change-btn",
+          style: {
+            background: "transparent",
+            color: theme.textMuted,
+            border: `1px solid ${theme.border}`
+          },
+          title: open ? "Hide the boxes" : "Edit the boxes",
+          onClick: () => setOpenId(open ? null : tag.id)
+        },
+        open ? "Done" : `${tag.fields.length} boxes`
+      ), /* @__PURE__ */ ShipReact$1.createElement(
+        IconButton,
+        {
+          label: `Delete the ${tag.label || "untitled"} tag`,
+          danger: true,
+          onClick: () => onChange(tags.filter((entry) => entry.id !== tag.id))
+        },
+        "✕"
+      )),
+      open ? /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-tag-boxes" }, /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-note", style: { color: theme.textMuted } }, "Each box becomes a line in the prompt, as", " ", /* @__PURE__ */ ShipReact$1.createElement("code", null, "Name: what you typed"), ". The example is only a hint shown inside the empty box."), tag.fields.map((field) => /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-tag-box-row", key: field.id }, /* @__PURE__ */ ShipReact$1.createElement(
+        "input",
+        {
+          className: "change-input",
+          style: inputStyle,
+          value: field.label,
+          placeholder: "Box name, e.g. Where",
+          spellCheck: false,
+          onChange: (event) => patchField(tag.id, field.id, { label: event.target.value })
+        }
+      ), /* @__PURE__ */ ShipReact$1.createElement(
+        "input",
+        {
+          className: "change-input",
+          style: inputStyle,
+          value: field.placeholder,
+          placeholder: "Example (optional)",
+          spellCheck: false,
+          onChange: (event) => patchField(tag.id, field.id, { placeholder: event.target.value })
+        }
+      ), /* @__PURE__ */ ShipReact$1.createElement(
+        IconButton,
+        {
+          label: "Remove this box",
+          onClick: () => patchTag(tag.id, {
+            fields: tag.fields.filter((entry) => entry.id !== field.id)
+          })
+        },
+        "✕"
+      ))), /* @__PURE__ */ ShipReact$1.createElement(
+        "button",
+        {
+          className: "change-btn",
+          style: {
+            background: "transparent",
+            color: theme.accent,
+            border: `1px dashed ${theme.border}`
+          },
+          onClick: () => patchTag(tag.id, { fields: [...tag.fields, createField()] })
+        },
+        "+ Add box"
+      ), !isUsable(tag) ? /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-note", style: { color: "var(--warning, #f59e0b)" } }, "Give the tag a name and at least one named box, and it will show up when you open a change.") : null) : null
+    );
+  })), /* @__PURE__ */ ShipReact$1.createElement(
+    "button",
+    {
+      className: "change-btn",
+      style: { background: theme.action, color: theme.actionText, marginTop: 8 },
+      onClick: addTag
+    },
+    "+ New tag"
+  ), /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-note", style: { color: theme.textMuted, marginTop: 8 } }, "Your tags follow you to every project, since they describe how you work rather than one site."));
 }
 function LayoutDiagnostics() {
   const theme = useTheme();
@@ -3028,6 +3263,7 @@ function Panel({ onClose }) {
   const [justSentId, setJustSentId] = useState(null);
   const [installedClis, setInstalledClis] = useState({});
   const [detectedPrefix, setDetectedPrefix] = useState("");
+  const [customTags, setCustomTags] = useState(loadCustomTags);
   const storedRef = useRef(stored);
   storedRef.current = stored;
   useEffect(() => {
@@ -3082,6 +3318,10 @@ function Panel({ onClose }) {
   useEffect(() => () => void persist2(), [persist2]);
   const setItems = useCallback((update) => {
     setStored((previous) => ({ ...previous, items: update(previous.items) }));
+  }, []);
+  const updateCustomTags = useCallback((next) => {
+    setCustomTags(next);
+    saveCustomTags(next);
   }, []);
   const patchSettings = useCallback((patch) => {
     setStored((previous) => ({ ...previous, settings: { ...previous.settings, ...patch } }));
@@ -3164,6 +3404,7 @@ function Panel({ onClose }) {
   const effectivePrefix = stored.settings.branchPrefix.trim() || detectedPrefix;
   const currentBranch = ctx.project.currentBranch;
   const improveAvailable = installedClis[stored.settings.improveCli] === true;
+  const customTemplates = customTags.filter(isUsable).map(toTemplate);
   const renderGroup = (label, items) => items.length === 0 ? null : /* @__PURE__ */ ShipReact.createElement("div", { className: "change-group", key: label }, /* @__PURE__ */ ShipReact.createElement("div", { className: "change-group-label", style: { color: theme.textMuted } }, label), items.map((item, index) => {
     var _a;
     return /* @__PURE__ */ ShipReact.createElement(
@@ -3203,6 +3444,7 @@ function Panel({ onClose }) {
           improveModel: stored.settings.improveModel,
           improveEffort: stored.settings.improveEffort,
           improveAvailable,
+          customTemplates,
           canMoveUp: index > 0,
           canMoveDown: index < items.length - 1,
           onChange: (patch) => patchItem(item.id, patch),
@@ -3230,6 +3472,8 @@ function Panel({ onClose }) {
         detectedPrefix,
         installedClis,
         shell: ctx.shell,
+        customTags,
+        onCustomTagsChange: updateCustomTags,
         onChange: patchSettings
       }
     ) : /* @__PURE__ */ ShipReact.createElement(ShipReact.Fragment, null, /* @__PURE__ */ ShipReact.createElement("div", { className: "change-capture" }, /* @__PURE__ */ ShipReact.createElement(

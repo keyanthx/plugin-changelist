@@ -39,6 +39,7 @@ import {
   type HostName,
 } from './dock.ts';
 import { applyHostLayout, isSelfDispatchedResize, restoreHostLayout } from './hostLayout.ts';
+import { loadCustomTags, saveCustomTags, toTemplate, isUsable, type CustomTag } from './customTags.ts';
 import { buildClipboardText } from './send.ts';
 import { injectStyles, removeStyles } from './styles.ts';
 import { ItemEditor } from './ui/editor.tsx';
@@ -86,6 +87,12 @@ function Panel({ onClose }: { onClose: () => void }) {
   /** Which agent CLIs are on the PATH, e.g. `{ claude: true, opencode: false }`. */
   const [installedClis, setInstalledClis] = useState<Record<string, boolean>>({});
   const [detectedPrefix, setDetectedPrefix] = useState('');
+  /**
+   * Tags you made yourself. Global rather than per project — a tag set is how
+   * you work, not a property of one site — so they load from localStorage
+   * synchronously rather than from the project's storage blob.
+   */
+  const [customTags, setCustomTags] = useState<CustomTag[]>(loadCustomTags);
 
   const storedRef = useRef(stored);
   storedRef.current = stored;
@@ -177,6 +184,12 @@ function Panel({ onClose }: { onClose: () => void }) {
 
   const setItems = useCallback((update: (items: ChangeItem[]) => ChangeItem[]) => {
     setStored((previous) => ({ ...previous, items: update(previous.items) }));
+  }, []);
+
+  /** Custom tags persist immediately — there's no debounce worth having here. */
+  const updateCustomTags = useCallback((next: CustomTag[]) => {
+    setCustomTags(next);
+    saveCustomTags(next);
   }, []);
 
   const patchSettings = useCallback((patch: Partial<Settings>) => {
@@ -306,6 +319,9 @@ function Panel({ onClose }: { onClose: () => void }) {
   const currentBranch = ctx.project.currentBranch;
   /** ✨ Improve only works if the CLI it's pointed at is actually installed. */
   const improveAvailable = installedClis[stored.settings.improveCli] === true;
+  /* Half-finished tags stay out of the chip row until they'd actually do
+     something — a nameless tag with no boxes is noise, not a choice. */
+  const customTemplates = customTags.filter(isUsable).map(toTemplate);
 
   /** One group of rows, each expanding into its editor in place. */
   const renderGroup = (label: string, items: ChangeItem[]) =>
@@ -352,6 +368,7 @@ function Panel({ onClose }: { onClose: () => void }) {
                 improveModel={stored.settings.improveModel}
                 improveEffort={stored.settings.improveEffort}
                 improveAvailable={improveAvailable}
+                customTemplates={customTemplates}
                 canMoveUp={index > 0}
                 canMoveDown={index < items.length - 1}
                 onChange={(patch) => patchItem(item.id, patch)}
@@ -415,6 +432,8 @@ function Panel({ onClose }: { onClose: () => void }) {
             detectedPrefix={detectedPrefix}
             installedClis={installedClis}
             shell={ctx.shell}
+            customTags={customTags}
+            onCustomTagsChange={updateCustomTags}
             onChange={patchSettings}
           />
         ) : (

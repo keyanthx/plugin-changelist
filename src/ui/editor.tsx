@@ -21,7 +21,7 @@ import {
   type Difficulty,
   type TemplateId,
 } from '../model.ts';
-import { TEMPLATES, composePrompt, findTemplate, type Template } from '../templates.ts';
+import { allTemplates, composePrompt, findTemplate, type Template } from '../templates.ts';
 import type { Shell } from '../types.ts';
 import { IconButton, Spinner } from './parts.tsx';
 import { difficultyColor } from './row.tsx';
@@ -36,6 +36,7 @@ export function ItemEditor({
   improveModel,
   improveEffort,
   improveAvailable,
+  customTemplates,
   canMoveUp,
   canMoveDown,
   onChange,
@@ -52,6 +53,8 @@ export function ItemEditor({
   improveEffort: string;
   /** False when that CLI isn't on the PATH — the button then hides. */
   improveAvailable: boolean;
+  /** Tags you made yourself, shown as chips beside the built-in ones. */
+  customTemplates: Template[];
   canMoveUp: boolean;
   canMoveDown: boolean;
   onChange: (patch: Partial<ChangeItem>) => void;
@@ -74,7 +77,7 @@ export function ItemEditor({
   const [showPrompt, setShowPrompt] = useState(false);
 
   const nudges = lintPrompt(item.prompt);
-  const template = findTemplate(item.template);
+  const template = findTemplate(item.template, customTemplates);
 
   /**
    * Any edit to a box recomposes the prompt.
@@ -89,10 +92,10 @@ export function ItemEditor({
       const nextNotes = patch.notes ?? item.notes;
       onChange({
         ...patch,
-        prompt: composePrompt(findTemplate(nextTemplateId), nextFields, nextNotes),
+        prompt: composePrompt(findTemplate(nextTemplateId, customTemplates), nextFields, nextNotes),
       });
     },
-    [item.fields, item.notes, item.template, onChange]
+    [customTemplates, item.fields, item.notes, item.template, onChange]
   );
 
   const setField = useCallback(
@@ -197,7 +200,7 @@ export function ItemEditor({
 
       {/* Pick one to get boxes; click it again to go back to free text. */}
       <div className="change-templates">
-        {TEMPLATES.map((entry) => {
+        {allTemplates(customTemplates).map((entry) => {
           const active = item.template === entry.id;
           return (
             <button

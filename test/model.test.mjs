@@ -164,13 +164,16 @@ test('a retired tag with no successor falls back to free text', () => {
   assert.equal(item.prompt, 'Tidy up Hero.tsx');
 });
 
-test('an unrecognised tag is dropped rather than kept as a broken id', () => {
+test('an unknown tag id is kept, because custom tags only exist at runtime', () => {
+  // Storage can't know which custom tags you've defined, so it keeps the id and
+  // lets `findTemplate` decide. Dropping it here would mean a custom tag was
+  // forgotten every time the panel reopened.
   const stored = {
     schema: 1,
-    items: [{ id: 'a', title: 'a', prompt: '', template: 'invented' }],
+    items: [{ id: 'a', title: 'a', prompt: '', template: 'custom:abc123' }],
     settings: {},
   };
-  assert.equal(readStored(stored).items[0].template, null);
+  assert.equal(readStored(stored).items[0].template, 'custom:abc123');
 });
 
 test('a stored item with fields reads them back', () => {

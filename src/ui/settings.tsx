@@ -25,13 +25,20 @@ import {
   type ClaudeCapabilities,
 } from '../catalogue.ts';
 import { copyText } from '../clipboard.ts';
+import {
+  createCustomTag,
+  createField,
+  isUsable,
+  type CustomTag,
+} from '../customTags.ts';
 import { useTheme } from '../context.ts';
 import { collectDiagnostics } from '../diagnostics.ts';
 import { useDock } from '../dock.ts';
 import { applyHostLayout, getLayoutReport, restoreHostLayout, subscribeLayout } from '../hostLayout.ts';
 import { DIFFICULTY_LABELS, type Difficulty, type Settings } from '../model.ts';
+import type { TemplateField } from '../templates.ts';
 import type { Shell } from '../types.ts';
-import { Field } from './parts.tsx';
+import { Field, IconButton } from './parts.tsx';
 import { difficultyColor } from './row.tsx';
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard'];
@@ -158,6 +165,8 @@ export function SettingsView({
   detectedPrefix,
   installedClis,
   shell,
+  customTags,
+  onCustomTagsChange,
   onChange,
 }: {
   settings: Settings;
@@ -166,6 +175,9 @@ export function SettingsView({
   /** Which agent CLIs are on the PATH, by id. */
   installedClis: Record<string, boolean>;
   shell: Shell | null;
+  /** Tags you made yourself, stored globally rather than per project. */
+  customTags: CustomTag[];
+  onCustomTagsChange: (tags: CustomTag[]) => void;
   onChange: (patch: Partial<Settings>) => void;
 }) {
   const theme = useTheme();
@@ -488,8 +500,189 @@ export function SettingsView({
         onChange={onChange}
       />
 
+      <CustomTagsSettings tags={customTags} onChange={onCustomTagsChange} />
+
       <LayoutDiagnostics />
     </div>
+  );
+}
+
+/**
+ * Make your own tags.
+ *
+ * A tag is only ever a name plus a few labelled boxes, so this editor is only
+ * ever a name field plus a list of box rows. No modes, no separate save step —
+ * typing is the edit, and it's stored as you go.
+ */
+function CustomTagsSettings({
+  tags,
+  onChange,
+}: {
+  tags: CustomTag[];
+  onChange: (tags: CustomTag[]) => void;
+}) {
+  const theme = useTheme();
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  const inputStyle = {
+    background: theme.bgPrimary,
+    color: theme.textPrimary,
+    border: `1px solid ${theme.border}`,
+  };
+
+  const patchTag = (id: string, patch: Partial<CustomTag>) =>
+    onChange(tags.map((tag) => (tag.id === id ? { ...tag, ...patch } : tag)));
+
+  const patchField = (tagId: string, fieldId: string, patch: Partial<TemplateField>) =>
+    onChange(
+      tags.map((tag) =>
+        tag.id === tagId
+          ? {
+              ...tag,
+              fields: tag.fields.map((field) =>
+                field.id === fieldId ? { ...field, ...patch } : field
+              ),
+            }
+          : tag
+      )
+    );
+
+  const addTag = () => {
+    const tag = createCustomTag();
+    onChange([...tags, tag]);
+    setOpenId(tag.id); // open it straight away — you made it to fill it in
+  };
+
+  return (
+    <Field label="Your own tags">
+      {tags.length === 0 ? (
+        <div className="change-settings-note" style={{ color: theme.textMuted, marginBottom: 8 }}>
+          A tag is a name and a few boxes to fill in. Make one for work you do
+          often — an SEO pass, a client review — and it appears beside Style,
+          Text and the rest.
+        </div>
+      ) : null}
+
+      <div className="change-tag-list">
+        {tags.map((tag) => {
+          const open = openId === tag.id;
+          return (
+            <div
+              key={tag.id}
+              className="change-tag-card"
+              style={{ borderColor: open ? theme.accent : theme.border }}
+            >
+              <div className="change-tag-head">
+                <input
+                  className="change-input"
+                  style={inputStyle}
+                  value={tag.label}
+                  placeholder="Tag name, e.g. SEO"
+                  spellCheck={false}
+                  onChange={(event) => patchTag(tag.id, { label: event.target.value })}
+                />
+                <button
+                  className="change-btn"
+                  style={{
+                    background: 'transparent',
+                    color: theme.textMuted,
+                    border: `1px solid ${theme.border}`,
+                  }}
+                  title={open ? 'Hide the boxes' : 'Edit the boxes'}
+                  onClick={() => setOpenId(open ? null : tag.id)}
+                >
+                  {open ? 'Done' : `${tag.fields.length} boxes`}
+                </button>
+                <IconButton
+                  label={`Delete the ${tag.label || 'untitled'} tag`}
+                  danger
+                  onClick={() => onChange(tags.filter((entry) => entry.id !== tag.id))}
+                >
+                  ✕
+                </IconButton>
+              </div>
+
+              {open ? (
+                <div className="change-tag-boxes">
+                  <div className="change-settings-note" style={{ color: theme.textMuted }}>
+                    Each box becomes a line in the prompt, as{' '}
+                    <code>Name: what you typed</code>. The example is only a hint
+                    shown inside the empty box.
+                  </div>
+
+                  {tag.fields.map((field) => (
+                    <div className="change-tag-box-row" key={field.id}>
+                      <input
+                        className="change-input"
+                        style={inputStyle}
+                        value={field.label}
+                        placeholder="Box name, e.g. Where"
+                        spellCheck={false}
+                        onChange={(event) =>
+                          patchField(tag.id, field.id, { label: event.target.value })
+                        }
+                      />
+                      <input
+                        className="change-input"
+                        style={inputStyle}
+                        value={field.placeholder}
+                        placeholder="Example (optional)"
+                        spellCheck={false}
+                        onChange={(event) =>
+                          patchField(tag.id, field.id, { placeholder: event.target.value })
+                        }
+                      />
+                      <IconButton
+                        label="Remove this box"
+                        onClick={() =>
+                          patchTag(tag.id, {
+                            fields: tag.fields.filter((entry) => entry.id !== field.id),
+                          })
+                        }
+                      >
+                        ✕
+                      </IconButton>
+                    </div>
+                  ))}
+
+                  <button
+                    className="change-btn"
+                    style={{
+                      background: 'transparent',
+                      color: theme.accent,
+                      border: `1px dashed ${theme.border}`,
+                    }}
+                    onClick={() => patchTag(tag.id, { fields: [...tag.fields, createField()] })}
+                  >
+                    + Add box
+                  </button>
+
+                  {!isUsable(tag) ? (
+                    <div className="change-settings-note" style={{ color: 'var(--warning, #f59e0b)' }}>
+                      Give the tag a name and at least one named box, and it will
+                      show up when you open a change.
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        className="change-btn"
+        style={{ background: theme.action, color: theme.actionText, marginTop: 8 }}
+        onClick={addTag}
+      >
+        + New tag
+      </button>
+
+      <div className="change-settings-note" style={{ color: theme.textMuted, marginTop: 8 }}>
+        Your tags follow you to every project, since they describe how you work
+        rather than one site.
+      </div>
+    </Field>
   );
 }
 

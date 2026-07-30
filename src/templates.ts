@@ -131,9 +131,25 @@ export const TEMPLATES: Template[] = [
   },
 ];
 
-export function findTemplate(id: TemplateId | null): Template | null {
+/**
+ * Look up a tag by id, across the built-in set and any custom ones.
+ *
+ * Returns null for an id that resolves to nothing — which is exactly what
+ * should happen when an item refers to a custom tag you've since deleted: the
+ * item falls back to free text, keeping everything that was typed.
+ */
+export function findTemplate(id: TemplateId | null, custom: Template[] = []): Template | null {
   if (!id) return null;
-  return TEMPLATES.find((template) => template.id === id) ?? null;
+  return (
+    TEMPLATES.find((template) => template.id === id) ??
+    custom.find((template) => template.id === id) ??
+    null
+  );
+}
+
+/** Built-in tags first, then yours — the order the chips are drawn in. */
+export function allTemplates(custom: Template[] = []): Template[] {
+  return [...TEMPLATES, ...custom];
 }
 
 /**

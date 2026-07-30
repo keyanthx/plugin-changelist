@@ -42,6 +42,13 @@ Each note quietly records the git branch you were on when you wrote it.
 
   Switching template keeps values that still apply — `where` means the same
   thing in a bug report and a restyle — and never touches your free text.
+
+- **Your own tags** — Settings → *Your own tags* → **+ New tag**. A tag is a name
+  and a few boxes; give each box a name and optionally an example, and it appears
+  as a chip beside the built-in ones and behaves identically. They're stored
+  globally rather than per project, since a tag set describes how *you* work
+  rather than one site. Deleting a tag never touches the items that used it —
+  their prompt and free text stay exactly as they were.
 - **Live hints** under the box: unfilled blanks, no page or file named, no
   desired outcome, vague words like "nicer". Informational only, never blocking.
 - **✨ Improve** — sends the note to an agent CLI already on your machine and
