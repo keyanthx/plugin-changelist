@@ -713,6 +713,7 @@ const CSS = `
   .change-row,
   .change-row-sent,
   .change-row-actions,
+  .change-template-x,
   .change-dot,
   .change-resize-handle {
     animation: none !important;
@@ -1165,11 +1166,42 @@ const CSS = `
   cursor: pointer;
   font-family: inherit;
   background: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
-/* The template's boxes. One column, tight, so five of them still read as one
-   form rather than five separate controls. */
-.change-fields { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* The active chip carries a ×, so it reads as a removable pill and it's clear
+   it can be clicked off rather than only swapped for another. */
+.change-template-active { background: rgba(127, 127, 127, 0.12); }
+
+.change-template-x {
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.55;
+  transition: opacity 0.12s ease-out;
+}
+.change-template-active:hover .change-template-x { opacity: 1; }
+
+/*
+ * The template's boxes, in a panel of their own.
+ *
+ * The border groups them so they read as "these belong to the active tag"
+ * rather than five loose inputs that happen to follow it, and the thicker left
+ * edge is tinted with the same accent as the highlighted chip above, tying the
+ * two together.
+ */
+.change-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid;
+  border-left-width: 2px;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.05);
+}
 
 .change-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 
@@ -2064,41 +2096,54 @@ function ItemEditor({
       },
       DIFFICULTY_LABELS[difficulty]
     );
-  })), /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-templates" }, TEMPLATES.map((entry) => /* @__PURE__ */ ShipReact$3.createElement(
-    "button",
-    {
-      key: entry.id,
-      className: "change-template-btn",
-      style: {
-        border: `1px solid ${item.template === entry.id ? theme.accent : theme.border}`,
-        color: item.template === entry.id ? theme.accent : theme.textSecondary
+  })), /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-templates" }, TEMPLATES.map((entry) => {
+    const active = item.template === entry.id;
+    return /* @__PURE__ */ ShipReact$3.createElement(
+      "button",
+      {
+        key: entry.id,
+        className: `change-template-btn${active ? " change-template-active" : ""}`,
+        style: {
+          border: `1px solid ${active ? theme.accent : theme.border}`,
+          color: active ? theme.accent : theme.textSecondary
+        },
+        title: active ? `Click to remove. ${entry.hint}` : entry.hint,
+        "aria-pressed": active,
+        onClick: () => pickTemplate(entry)
       },
-      title: entry.hint,
-      "aria-pressed": item.template === entry.id,
-      onClick: () => pickTemplate(entry)
+      entry.label,
+      active ? /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-template-x" }, "×") : null
+    );
+  })), template ? /* @__PURE__ */ ShipReact$3.createElement(
+    "div",
+    {
+      className: "change-fields",
+      style: { borderColor: theme.border, borderLeftColor: theme.accent },
+      role: "group",
+      "aria-label": `${template.label} template fields`
     },
-    entry.label
-  ))), template ? /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-fields" }, template.fields.map((field) => /* @__PURE__ */ ShipReact$3.createElement("label", { className: "change-field", key: field.id }, /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-field-name", style: { color: theme.textMuted } }, field.label), field.multiline ? /* @__PURE__ */ ShipReact$3.createElement(
-    "textarea",
-    {
-      className: "change-input change-field-box change-field-multiline",
-      style: boxStyle,
-      value: item.fields[field.id] ?? "",
-      placeholder: field.placeholder,
-      spellCheck: false,
-      onChange: (event) => setField(field.id, event.target.value)
-    }
-  ) : /* @__PURE__ */ ShipReact$3.createElement(
-    "input",
-    {
-      className: "change-input change-field-box",
-      style: boxStyle,
-      value: item.fields[field.id] ?? "",
-      placeholder: field.placeholder,
-      spellCheck: false,
-      onChange: (event) => setField(field.id, event.target.value)
-    }
-  )))) : null, /* @__PURE__ */ ShipReact$3.createElement("label", { className: "change-field" }, template ? /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-field-name", style: { color: theme.textMuted } }, "Anything else") : null, /* @__PURE__ */ ShipReact$3.createElement(
+    template.fields.map((field) => /* @__PURE__ */ ShipReact$3.createElement("label", { className: "change-field", key: field.id }, /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-field-name", style: { color: theme.textMuted } }, field.label), field.multiline ? /* @__PURE__ */ ShipReact$3.createElement(
+      "textarea",
+      {
+        className: "change-input change-field-box change-field-multiline",
+        style: boxStyle,
+        value: item.fields[field.id] ?? "",
+        placeholder: field.placeholder,
+        spellCheck: false,
+        onChange: (event) => setField(field.id, event.target.value)
+      }
+    ) : /* @__PURE__ */ ShipReact$3.createElement(
+      "input",
+      {
+        className: "change-input change-field-box",
+        style: boxStyle,
+        value: item.fields[field.id] ?? "",
+        placeholder: field.placeholder,
+        spellCheck: false,
+        onChange: (event) => setField(field.id, event.target.value)
+      }
+    )))
+  ) : null, /* @__PURE__ */ ShipReact$3.createElement("label", { className: "change-field" }, template ? /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-field-name", style: { color: theme.textMuted } }, "Anything else") : null, /* @__PURE__ */ ShipReact$3.createElement(
     "textarea",
     {
       className: "change-textarea",

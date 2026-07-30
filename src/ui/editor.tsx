@@ -197,26 +197,41 @@ export function ItemEditor({
 
       {/* Pick one to get boxes; click it again to go back to free text. */}
       <div className="change-templates">
-        {TEMPLATES.map((entry) => (
-          <button
-            key={entry.id}
-            className="change-template-btn"
-            style={{
-              border: `1px solid ${item.template === entry.id ? theme.accent : theme.border}`,
-              color: item.template === entry.id ? theme.accent : theme.textSecondary,
-            }}
-            title={entry.hint}
-            aria-pressed={item.template === entry.id}
-            onClick={() => pickTemplate(entry)}
-          >
-            {entry.label}
-          </button>
-        ))}
+        {TEMPLATES.map((entry) => {
+          const active = item.template === entry.id;
+          return (
+            <button
+              key={entry.id}
+              className={`change-template-btn${active ? ' change-template-active' : ''}`}
+              style={{
+                border: `1px solid ${active ? theme.accent : theme.border}`,
+                color: active ? theme.accent : theme.textSecondary,
+              }}
+              title={active ? `Click to remove. ${entry.hint}` : entry.hint}
+              aria-pressed={active}
+              onClick={() => pickTemplate(entry)}
+            >
+              {entry.label}
+              {/* Reads as a removable pill, so it's obvious the active one can
+                  be clicked off rather than only swapped for another. */}
+              {active ? <span className="change-template-x">×</span> : null}
+            </button>
+          );
+        })}
       </div>
 
-      {/* One box per thing worth saying. Leave any of them blank. */}
+      {/*
+       * The boxes sit in their own bordered panel with an accent edge matching
+       * the highlighted chip above, so it reads as "these belong to Style"
+       * rather than as five loose inputs that happen to follow it.
+       */}
       {template ? (
-        <div className="change-fields">
+        <div
+          className="change-fields"
+          style={{ borderColor: theme.border, borderLeftColor: theme.accent }}
+          role="group"
+          aria-label={`${template.label} template fields`}
+        >
           {template.fields.map((field) => (
             <label className="change-field" key={field.id}>
               <span className="change-field-name" style={{ color: theme.textMuted }}>

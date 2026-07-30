@@ -29,6 +29,7 @@ export const CSS = `
   .change-row,
   .change-row-sent,
   .change-row-actions,
+  .change-template-x,
   .change-dot,
   .change-resize-handle {
     animation: none !important;
@@ -481,11 +482,42 @@ export const CSS = `
   cursor: pointer;
   font-family: inherit;
   background: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
-/* The template's boxes. One column, tight, so five of them still read as one
-   form rather than five separate controls. */
-.change-fields { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* The active chip carries a ×, so it reads as a removable pill and it's clear
+   it can be clicked off rather than only swapped for another. */
+.change-template-active { background: rgba(127, 127, 127, 0.12); }
+
+.change-template-x {
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.55;
+  transition: opacity 0.12s ease-out;
+}
+.change-template-active:hover .change-template-x { opacity: 1; }
+
+/*
+ * The template's boxes, in a panel of their own.
+ *
+ * The border groups them so they read as "these belong to the active tag"
+ * rather than five loose inputs that happen to follow it, and the thicker left
+ * edge is tinted with the same accent as the highlighted chip above, tying the
+ * two together.
+ */
+.change-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid;
+  border-left-width: 2px;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.05);
+}
 
 .change-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 
