@@ -300,28 +300,6 @@ function Panel({ onClose }: { onClose: () => void }) {
   /** ✨ Improve only works if the CLI it's pointed at is actually installed. */
   const improveAvailable = installedClis[stored.settings.improveCli] === true;
 
-  if (view === 'settings') {
-    return (
-      <PanelFrame
-        title="Settings"
-        onClose={onClose}
-        headerExtra={
-          <IconButton label="Back to the list" onClick={() => setView('list')}>
-            ← Back
-          </IconButton>
-        }
-      >
-        <SettingsView
-          settings={stored.settings}
-          detectedPrefix={detectedPrefix}
-          installedClis={installedClis}
-          shell={ctx.shell}
-          onChange={patchSettings}
-        />
-      </PanelFrame>
-    );
-  }
-
   /** One group of rows, each expanding into its editor in place. */
   const renderGroup = (label: string, items: ChangeItem[]) =>
     items.length === 0 ? null : (
@@ -373,24 +351,58 @@ function Panel({ onClose }: { onClose: () => void }) {
       </div>
     );
 
+  const settingsView = view === 'settings';
+
+  /*
+   * One PanelFrame for every view, with only its contents swapping.
+   *
+   * Settings used to `return` its own PanelFrame from an early branch while the
+   * list returned a Fragment. Those are different root types, so React tore the
+   * whole frame down and built a new one on each switch — the `.change-frame`
+   * node was destroyed and recreated, landing at a different position among its
+   * siblings in Ship Studio's header. Any positional host CSS (`:last-child`,
+   * `nth-child`, `div + div`) then started matching it, which is why the layout
+   * only collapsed *after* a trip through Settings. Keeping one frame also
+   * keeps the scroll position and avoids re-running the pin/reflow effects.
+   */
   return (
     <>
       <PanelFrame
         title={
-          <>
-            Change List
-            {openCount > 0 ? (
-              <span style={{ color: theme.textMuted, fontWeight: 400 }}> · {openCount} open</span>
-            ) : null}
-          </>
+          settingsView ? (
+            'Settings'
+          ) : (
+            <>
+              Change List
+              {openCount > 0 ? (
+                <span style={{ color: theme.textMuted, fontWeight: 400 }}> · {openCount} open</span>
+              ) : null}
+            </>
+          )
         }
         onClose={onClose}
         headerExtra={
-          <IconButton label="Settings" onClick={() => setView('settings')}>
-            ⚙
-          </IconButton>
+          settingsView ? (
+            <IconButton label="Back to the list" onClick={() => setView('list')}>
+              ← Back
+            </IconButton>
+          ) : (
+            <IconButton label="Settings" onClick={() => setView('settings')}>
+              ⚙
+            </IconButton>
+          )
         }
       >
+        {settingsView ? (
+          <SettingsView
+            settings={stored.settings}
+            detectedPrefix={detectedPrefix}
+            installedClis={installedClis}
+            shell={ctx.shell}
+            onChange={patchSettings}
+          />
+        ) : (
+        <>
         <div className="change-capture">
           <input
             className="change-input"
@@ -466,6 +478,8 @@ function Panel({ onClose }: { onClose: () => void }) {
               : null}
           </div>
         ) : null}
+        </>
+        )}
       </PanelFrame>
 
       {sendItem ? (

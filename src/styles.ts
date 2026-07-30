@@ -117,6 +117,37 @@ export const CSS = `
 .change-overlay .change-modal-body {
   overflow-y: auto !important;
   overflow-x: hidden !important;
+  /*
+   * Stack the contents, whatever the host says. Ship Studio's header styles its
+   * descendants as toolbar rows, and a stray display:flex here lays the capture
+   * box, the hint and every group out side by side, stretched to full height.
+   * Our own flex containers below set their display explicitly, so pinning this
+   * one to block costs nothing.
+   */
+  display: block !important;
+}
+
+/*
+ * Our flex rows, restated so a host rule can't change the axis under them.
+ * Same reasoning as above: inside the header subtree, layout properties are
+ * contested, and these are the ones whose direction actually matters.
+ */
+.change-frame .change-capture,
+.change-frame .change-radio-row,
+.change-frame .change-settings-row,
+.change-frame .change-editor-actions,
+.change-frame .change-row-main,
+.change-frame .change-templates {
+  display: flex !important;
+  flex-direction: row !important;
+}
+
+.change-frame .change-settings,
+.change-frame .change-editor,
+.change-frame .change-popover-body,
+.change-frame .change-settings-grid {
+  display: flex !important;
+  flex-direction: column !important;
 }
 
 /* ---------------------------------------------------------------- modal */

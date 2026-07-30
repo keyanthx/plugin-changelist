@@ -747,6 +747,37 @@ const CSS = `
 .change-overlay .change-modal-body {
   overflow-y: auto !important;
   overflow-x: hidden !important;
+  /*
+   * Stack the contents, whatever the host says. Ship Studio's header styles its
+   * descendants as toolbar rows, and a stray display:flex here lays the capture
+   * box, the hint and every group out side by side, stretched to full height.
+   * Our own flex containers below set their display explicitly, so pinning this
+   * one to block costs nothing.
+   */
+  display: block !important;
+}
+
+/*
+ * Our flex rows, restated so a host rule can't change the axis under them.
+ * Same reasoning as above: inside the header subtree, layout properties are
+ * contested, and these are the ones whose direction actually matters.
+ */
+.change-frame .change-capture,
+.change-frame .change-radio-row,
+.change-frame .change-settings-row,
+.change-frame .change-editor-actions,
+.change-frame .change-row-main,
+.change-frame .change-templates {
+  display: flex !important;
+  flex-direction: row !important;
+}
+
+.change-frame .change-settings,
+.change-frame .change-editor,
+.change-frame .change-popover-body,
+.change-frame .change-settings-grid {
+  display: flex !important;
+  flex-direction: column !important;
 }
 
 /* ---------------------------------------------------------------- modal */
@@ -2546,26 +2577,6 @@ function Panel({ onClose }) {
   const effectivePrefix = stored.settings.branchPrefix.trim() || detectedPrefix;
   const currentBranch = ctx.project.currentBranch;
   const improveAvailable = installedClis[stored.settings.improveCli] === true;
-  if (view === "settings") {
-    return /* @__PURE__ */ ShipReact.createElement(
-      PanelFrame,
-      {
-        title: "Settings",
-        onClose,
-        headerExtra: /* @__PURE__ */ ShipReact.createElement(IconButton, { label: "Back to the list", onClick: () => setView("list") }, "← Back")
-      },
-      /* @__PURE__ */ ShipReact.createElement(
-        SettingsView,
-        {
-          settings: stored.settings,
-          detectedPrefix,
-          installedClis,
-          shell: ctx.shell,
-          onChange: patchSettings
-        }
-      )
-    );
-  }
   const renderGroup = (label, items) => items.length === 0 ? null : /* @__PURE__ */ ShipReact.createElement("div", { className: "change-group", key: label }, /* @__PURE__ */ ShipReact.createElement("div", { className: "change-group-label", style: { color: theme.textMuted } }, label), items.map((item, index) => {
     var _a;
     return /* @__PURE__ */ ShipReact.createElement(
@@ -2612,14 +2623,24 @@ function Panel({ onClose }) {
       ) : null
     );
   }));
+  const settingsView = view === "settings";
   return /* @__PURE__ */ ShipReact.createElement(ShipReact.Fragment, null, /* @__PURE__ */ ShipReact.createElement(
     PanelFrame,
     {
-      title: /* @__PURE__ */ ShipReact.createElement(ShipReact.Fragment, null, "Change List", openCount > 0 ? /* @__PURE__ */ ShipReact.createElement("span", { style: { color: theme.textMuted, fontWeight: 400 } }, " · ", openCount, " open") : null),
+      title: settingsView ? "Settings" : /* @__PURE__ */ ShipReact.createElement(ShipReact.Fragment, null, "Change List", openCount > 0 ? /* @__PURE__ */ ShipReact.createElement("span", { style: { color: theme.textMuted, fontWeight: 400 } }, " · ", openCount, " open") : null),
       onClose,
-      headerExtra: /* @__PURE__ */ ShipReact.createElement(IconButton, { label: "Settings", onClick: () => setView("settings") }, "⚙")
+      headerExtra: settingsView ? /* @__PURE__ */ ShipReact.createElement(IconButton, { label: "Back to the list", onClick: () => setView("list") }, "← Back") : /* @__PURE__ */ ShipReact.createElement(IconButton, { label: "Settings", onClick: () => setView("settings") }, "⚙")
     },
-    /* @__PURE__ */ ShipReact.createElement("div", { className: "change-capture" }, /* @__PURE__ */ ShipReact.createElement(
+    settingsView ? /* @__PURE__ */ ShipReact.createElement(
+      SettingsView,
+      {
+        settings: stored.settings,
+        detectedPrefix,
+        installedClis,
+        shell: ctx.shell,
+        onChange: patchSettings
+      }
+    ) : /* @__PURE__ */ ShipReact.createElement(ShipReact.Fragment, null, /* @__PURE__ */ ShipReact.createElement("div", { className: "change-capture" }, /* @__PURE__ */ ShipReact.createElement(
       "input",
       {
         className: "change-input",
@@ -2645,12 +2666,7 @@ function Panel({ onClose }) {
         onClick: addFromDraft
       },
       "Add"
-    )),
-    /* @__PURE__ */ ShipReact.createElement("div", { className: "change-capture-hint", style: { color: theme.textMuted } }, "Jot the title now, press Enter, write the prompt later."),
-    !hydrated ? /* @__PURE__ */ ShipReact.createElement("div", { className: "change-empty", style: { color: theme.textMuted } }, "Loading…") : stored.items.length === 0 ? /* @__PURE__ */ ShipReact.createElement("div", { className: "change-empty", style: { color: theme.textMuted } }, "Nothing on the list yet.", /* @__PURE__ */ ShipReact.createElement("br", null), "Add changes as you notice them, then send them to your agent one at a time.") : null,
-    renderGroup("In progress", groups.doing),
-    renderGroup("To do", groups.todo),
-    groups.done.length > 0 ? /* @__PURE__ */ ShipReact.createElement("div", { className: "change-group" }, /* @__PURE__ */ ShipReact.createElement(
+    )), /* @__PURE__ */ ShipReact.createElement("div", { className: "change-capture-hint", style: { color: theme.textMuted } }, "Jot the title now, press Enter, write the prompt later."), !hydrated ? /* @__PURE__ */ ShipReact.createElement("div", { className: "change-empty", style: { color: theme.textMuted } }, "Loading…") : stored.items.length === 0 ? /* @__PURE__ */ ShipReact.createElement("div", { className: "change-empty", style: { color: theme.textMuted } }, "Nothing on the list yet.", /* @__PURE__ */ ShipReact.createElement("br", null), "Add changes as you notice them, then send them to your agent one at a time.") : null, renderGroup("In progress", groups.doing), renderGroup("To do", groups.todo), groups.done.length > 0 ? /* @__PURE__ */ ShipReact.createElement("div", { className: "change-group" }, /* @__PURE__ */ ShipReact.createElement(
       "button",
       {
         className: "change-fold",
@@ -2682,7 +2698,7 @@ function Panel({ onClose }) {
           onOptions: () => setSendId(item.id)
         }
       )
-    )) : null) : null
+    )) : null) : null)
   ), sendItem ? /* @__PURE__ */ ShipReact.createElement(
     SendPanel,
     {
