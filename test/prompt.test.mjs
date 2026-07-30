@@ -100,6 +100,58 @@ test('field ids are unique within a template', () => {
   }
 });
 
+test('the six tags are the ones we designed for', () => {
+  assert.deepEqual(
+    TEMPLATES.map((t) => t.id),
+    ['style', 'text', 'layout', 'add', 'behaviour', 'bug']
+  );
+});
+
+test('every tag asks where the change goes', () => {
+  // "No page, section or file named" is the nudge that fires most often, so
+  // every tag makes it a box rather than hoping you mention it.
+  for (const template of TEMPLATES) {
+    assert.ok(
+      template.fields.some((f) => f.id === 'where'),
+      `${template.id} never asks where`
+    );
+  }
+});
+
+test('no tag asks more than five things', () => {
+  // Most items get sent with no prompt at all, so every extra box is friction
+  // that pushes people back to bare titles.
+  for (const template of TEMPLATES) {
+    assert.ok(template.fields.length <= 5, `${template.id} asks too much`);
+  }
+});
+
+test('screen size is askable where it matters', () => {
+  // "Hero headline wraps badly on mobile" had nowhere to put "on mobile".
+  for (const id of ['style', 'bug']) {
+    assert.ok(findTemplate(id).fields.some((f) => f.id === 'screen'), `${id} lost screen size`);
+  }
+});
+
+test('Add covers a button, not just a section', () => {
+  // "send email button on nav bar" was filed with no tag at all, because
+  // "New section" was the wrong word for a button.
+  const add = findTemplate('add');
+  const out = composePrompt(add, { what: 'a Send email button', where: 'the nav bar' }, '');
+  assert.equal(out, 'What to add: a Send email button\nWhere: the nav bar');
+});
+
+test('Layout captures where something should end up', () => {
+  // "Move gallery above testimonials" previously fit nothing.
+  const layout = findTemplate('layout');
+  const out = composePrompt(
+    layout,
+    { what: 'the gallery section', where: 'home page', destination: 'above the testimonials' },
+    ''
+  );
+  assert.match(out, /Should end up: above the testimonials/);
+});
+
 test('templates share field ids so switching keeps what still applies', () => {
   // `where` means the same thing in a bug report and a restyle, so carrying it
   // across is the point rather than an accident.

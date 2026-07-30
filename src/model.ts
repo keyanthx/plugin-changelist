@@ -16,8 +16,14 @@ export type Difficulty = 'easy' | 'normal' | 'hard';
 /** Where an item is in the pipeline. */
 export type Status = 'todo' | 'doing' | 'done';
 
-/** Which prompt skeleton was used, if any. See `templates.ts`. */
-export type TemplateId = 'style' | 'copy' | 'bug' | 'new-section' | 'refactor';
+/**
+ * Which set of boxes is in use, if any. See `templates.ts`.
+ *
+ * `copy`, `new-section` and `refactor` are retired but still accepted, so an
+ * item saved under an old id reads back without losing its template — see
+ * `readTemplateId`.
+ */
+export type TemplateId = 'style' | 'text' | 'layout' | 'add' | 'behaviour' | 'bug';
 
 export interface ChangeItem {
   id: string;
@@ -140,6 +146,30 @@ function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
+const TEMPLATE_IDS: TemplateId[] = ['style', 'text', 'layout', 'add', 'behaviour', 'bug'];
+
+/**
+ * Tags that used to exist, mapped to where their work now lives.
+ *
+ * An item saved under `copy` should still open with its boxes rather than
+ * silently losing the tag. `refactor` has no successor — it described code
+ * hygiene rather than a change a visitor would notice — so those items fall
+ * back to free text, which still holds everything that was typed.
+ */
+const RETIRED_TEMPLATE_IDS: Record<string, TemplateId | null> = {
+  copy: 'text',
+  'new-section': 'add',
+  refactor: null,
+};
+
+function readTemplateId(value: unknown): TemplateId | null {
+  const id = asString(value);
+  if (!id) return null;
+  if ((TEMPLATE_IDS as string[]).includes(id)) return id as TemplateId;
+  if (id in RETIRED_TEMPLATE_IDS) return RETIRED_TEMPLATE_IDS[id];
+  return null;
+}
+
 /** Keep only the string entries; a malformed value shouldn't poison the form. */
 function readFields(raw: Record<string, unknown>): Record<string, string> {
   const fields: Record<string, string> = {};
@@ -182,7 +212,7 @@ function readItem(value: unknown): ChangeItem | null {
     notes,
     difficulty: DIFFICULTIES.includes(difficulty) ? difficulty : 'normal',
     status: STATUSES.includes(status) ? status : 'todo',
-    template: asString(value.template) ? (value.template as TemplateId) : null,
+    template: readTemplateId(value.template),
     branchAtCapture: typeof value.branchAtCapture === 'string' ? value.branchAtCapture : null,
     workBranch: typeof value.workBranch === 'string' ? value.workBranch : null,
     createdAt: asString(value.createdAt, new Date().toISOString()),

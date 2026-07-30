@@ -21,9 +21,21 @@ Each note quietly records the git branch you were on when you wrote it.
 
 **Write the prompt.** Open an item and you get three kinds of help:
 
-- **Templates** — Style, Copy, Bug, New section, Refactor. Each gives you a few
-  labelled boxes to fill: *what*, *where*, *what done looks like*, *what not to
-  touch*. **Leave any of them blank** — an empty box contributes nothing. The
+- **Tags** — six, each asking what that kind of change actually needs:
+
+  | Tag | For | Boxes |
+  |---|---|---|
+  | **Style** | how something already there looks | what · where · should be · screen size · keep |
+  | **Text** | wording | what · where · current text · should say |
+  | **Layout** | move, reorder, resize, remove | what · where · should end up · keep |
+  | **Add** | something not there yet — a button, a section, a page | what · where · content · what it does · match |
+  | **Behaviour** | clicks, hovers, forms, links, animation | what · where · should do · keep working |
+  | **Bug** | something is broken | what goes wrong · where · steps · expected · only on |
+
+  Every tag asks **where**, because "no page, section or file named" is the hint
+  that fires most often. None asks more than five things — most items get sent
+  with no prompt at all, so every extra box is friction. **Leave any of them
+  blank** — an empty box contributes nothing. The
   prompt is assembled from what you filled in, by plain string joining, so what
   the preview shows is exactly what gets sent. Click the active template again
   to go back to writing freehand.

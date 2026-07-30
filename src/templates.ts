@@ -35,29 +35,79 @@ export interface Template {
   fields: TemplateField[];
 }
 
+/*
+ * Six tags, each asking questions the others don't.
+ *
+ * Chosen against real queued items rather than invented categories: "send email
+ * button on nav bar" had nowhere to go (a button isn't a "new section"), "move
+ * gallery above testimonials" had nowhere to go at all, and "hero headline
+ * wraps badly on mobile" had no place to say *on mobile*. Hence Add being
+ * broader than New section, Layout existing, and Style carrying a screen-size
+ * box.
+ *
+ * Deliberately 3–5 boxes each. In practice most items get sent with no prompt
+ * at all, so every extra box is friction that pushes people back to bare
+ * titles — the free-text box catches whatever the boxes don't ask for.
+ */
 export const TEMPLATES: Template[] = [
   {
     id: 'style',
     label: 'Style',
-    hint: 'Spacing, colour, size, weight — how something looks.',
+    hint: 'How something already on the page looks — colour, size, spacing, weight.',
     fields: [
       { id: 'what', label: 'What', placeholder: 'the hero headline' },
       { id: 'where', label: 'Where', placeholder: 'home page, or src/components/Hero.tsx' },
-      { id: 'now', label: 'Now', placeholder: 'how it looks today' },
       { id: 'should', label: 'Should be', placeholder: 'the size, spacing or colour you want' },
+      // The single most common web-specific detail an agent otherwise guesses.
+      { id: 'screen', label: 'Screen size', placeholder: 'only on mobile, only above 1024px…' },
       { id: 'keep', label: 'Keep', placeholder: "what mustn't change" },
     ],
   },
   {
-    id: 'copy',
-    label: 'Copy',
+    id: 'text',
+    label: 'Text',
     hint: 'Wording — headlines, body text, button labels.',
     fields: [
       { id: 'what', label: 'What', placeholder: 'the headline, a button label' },
       { id: 'where', label: 'Where', placeholder: 'home page, hero section' },
+      // Pasting the exact string is what lets an agent find it without guessing.
       { id: 'current', label: 'Current text', placeholder: 'paste it here', multiline: true },
       { id: 'should', label: 'Should say', placeholder: 'the message, and the tone' },
-      { id: 'keep', label: 'Keep', placeholder: 'length limit, words to avoid' },
+    ],
+  },
+  {
+    id: 'layout',
+    label: 'Layout',
+    hint: 'Moving, reordering, resizing or removing things that already exist.',
+    fields: [
+      { id: 'what', label: 'What', placeholder: 'the gallery section' },
+      { id: 'where', label: 'Where', placeholder: 'home page' },
+      // The relationship is the whole point of a layout change.
+      { id: 'destination', label: 'Should end up', placeholder: 'above the testimonials, or removed' },
+      { id: 'keep', label: 'Keep', placeholder: "what mustn't move or change" },
+    ],
+  },
+  {
+    id: 'add',
+    label: 'Add',
+    hint: "Something that isn't there yet — a button, a section, a page.",
+    fields: [
+      { id: 'what', label: 'What to add', placeholder: 'a Send email button' },
+      { id: 'where', label: 'Where', placeholder: 'the nav bar, or below the hero' },
+      { id: 'content', label: 'Content', placeholder: 'its label, text, images, links', multiline: true },
+      { id: 'does', label: 'What it does', placeholder: 'opens the mail app, links to /contact' },
+      { id: 'match', label: 'Match', placeholder: 'the existing thing it should look like' },
+    ],
+  },
+  {
+    id: 'behaviour',
+    label: 'Behaviour',
+    hint: 'How something responds — clicks, hovers, forms, links, animation.',
+    fields: [
+      { id: 'what', label: 'What', placeholder: 'the mobile menu' },
+      { id: 'where', label: 'Where', placeholder: 'the header, on every page' },
+      { id: 'does', label: 'Should do', placeholder: 'close when you click outside it' },
+      { id: 'keep', label: 'Keep working', placeholder: "what mustn't break" },
     ],
   },
   {
@@ -66,40 +116,17 @@ export const TEMPLATES: Template[] = [
     hint: 'Something is broken and you can describe how to see it.',
     fields: [
       /*
-       * `symptom`, not the shared `what`, on purpose. Elsewhere `what` names a
-       * thing ("the hero headline"); here it describes a behaviour ("submits
-       * twice"). Sharing the key would carry a noun into "What goes wrong" and
-       * read as nonsense. `where` genuinely does mean the same thing, so it
-       * stays shared.
+       * `symptom`, not the shared `what`. Elsewhere `what` names a thing ("the
+       * hero headline"); here it describes a behaviour ("submits twice").
+       * Sharing the key would carry a noun into "What goes wrong" and read as
+       * nonsense. `where` genuinely does mean the same thing everywhere, so it
+       * stays shared and carries across a tag switch.
        */
       { id: 'symptom', label: 'What goes wrong', placeholder: 'the form submits twice' },
       { id: 'where', label: 'Where', placeholder: 'contact page, or the file' },
       { id: 'steps', label: 'Steps', placeholder: 'what you do to see it happen', multiline: true },
       { id: 'expected', label: 'Expected', placeholder: 'what should happen instead' },
-      { id: 'only', label: 'Only on', placeholder: 'a browser or screen size, if not everywhere' },
-    ],
-  },
-  {
-    id: 'new-section',
-    label: 'New section',
-    hint: 'Adding something that is not on the page yet.',
-    fields: [
-      { id: 'what', label: 'What to add', placeholder: 'a testimonials section' },
-      { id: 'where', label: 'Where', placeholder: 'home page, below the hero' },
-      { id: 'content', label: 'Content', placeholder: 'headline, text, images, links', multiline: true },
-      { id: 'behaviour', label: 'Behaviour', placeholder: 'responsive rules, animation, where links go' },
-      { id: 'match', label: 'Match', placeholder: 'the existing section it should sit alongside' },
-    ],
-  },
-  {
-    id: 'refactor',
-    label: 'Refactor',
-    hint: 'Tidying code without changing what the visitor sees.',
-    fields: [
-      { id: 'what', label: 'What', placeholder: 'the file or component' },
-      { id: 'goal', label: 'Goal', placeholder: 'what should be easier afterwards' },
-      { id: 'keep', label: 'Keep identical', placeholder: 'the rendered output, the props it takes' },
-      { id: 'avoid', label: "Don't", placeholder: 'rename things, touch other files' },
+      { id: 'screen', label: 'Only on', placeholder: 'a browser or screen size, if not everywhere' },
     ],
   },
 ];

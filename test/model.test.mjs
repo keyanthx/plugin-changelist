@@ -134,6 +134,45 @@ test('an item written before templates became fields keeps its prompt', () => {
   assert.deepEqual(restored.fields, {});
 });
 
+test('items saved under a retired tag keep their boxes', () => {
+  // `copy` became `text` and `new-section` became `add`. Dropping the tag would
+  // strip the form off an item that had one, for no reason the user caused.
+  const stored = {
+    schema: 1,
+    items: [
+      { id: 'a', title: 'a', prompt: '', template: 'copy' },
+      { id: 'b', title: 'b', prompt: '', template: 'new-section' },
+    ],
+    settings: {},
+  };
+  const [a, b] = readStored(stored).items;
+  assert.equal(a.template, 'text');
+  assert.equal(b.template, 'add');
+});
+
+test('a retired tag with no successor falls back to free text', () => {
+  // `refactor` described code hygiene rather than a change a visitor notices,
+  // so it has no successor — but whatever was typed still survives as notes.
+  const stored = {
+    schema: 1,
+    items: [{ id: 'a', title: 'a', prompt: 'Tidy up Hero.tsx', template: 'refactor' }],
+    settings: {},
+  };
+  const [item] = readStored(stored).items;
+  assert.equal(item.template, null);
+  assert.equal(item.notes, 'Tidy up Hero.tsx');
+  assert.equal(item.prompt, 'Tidy up Hero.tsx');
+});
+
+test('an unrecognised tag is dropped rather than kept as a broken id', () => {
+  const stored = {
+    schema: 1,
+    items: [{ id: 'a', title: 'a', prompt: '', template: 'invented' }],
+    settings: {},
+  };
+  assert.equal(readStored(stored).items[0].template, null);
+});
+
 test('a stored item with fields reads them back', () => {
   const stored = {
     schema: 1,
