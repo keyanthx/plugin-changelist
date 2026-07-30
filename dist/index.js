@@ -1662,6 +1662,27 @@ function getFrameOrigin(headerElement) {
   const rect = (frame ?? headerElement).getBoundingClientRect();
   return { x: rect.left, y: rect.top };
 }
+function PinIcon({ filled }) {
+  return /* @__PURE__ */ ShipReact$5.createElement(
+    "svg",
+    {
+      width: "15",
+      height: "15",
+      viewBox: "0 0 24 24",
+      fill: filled ? "currentColor" : "none",
+      stroke: "currentColor",
+      strokeWidth: "2"
+    },
+    /* @__PURE__ */ ShipReact$5.createElement(
+      "path",
+      {
+        d: "M12 2C8.7 2 6 4.7 6 8c0 4.5 6 12 6 12s6-7.5 6-12c0-3.3-2.7-6-6-6z",
+        strokeLinejoin: "round"
+      }
+    ),
+    !filled ? /* @__PURE__ */ ShipReact$5.createElement("circle", { cx: "12", cy: "8", r: "2.2" }) : null
+  );
+}
 function PinButton() {
   const theme = useTheme();
   const dock = useDock();
@@ -1676,7 +1697,7 @@ function PinButton() {
       "aria-pressed": pinned,
       onClick: () => setDock({ mode: pinned ? "window" : "pinned" })
     },
-    pinned ? "📌" : "📍"
+    /* @__PURE__ */ ShipReact$5.createElement(PinIcon, { filled: pinned })
   );
 }
 function IconButton({

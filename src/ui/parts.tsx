@@ -325,6 +325,32 @@ function getFrameOrigin(headerElement: HTMLElement): { x: number; y: number } {
   return { x: rect.left, y: rect.top };
 }
 
+/**
+ * A map-pin outline, filled when pinned.
+ *
+ * Matches the toolbar's `Icon()` convention (15×15, viewBox 0 0 24 24,
+ * currentColor stroke) so it sits at the same size and weight as its
+ * neighbours, rather than an emoji that renders differently per platform.
+ */
+function PinIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path
+        d="M12 2C8.7 2 6 4.7 6 8c0 4.5 6 12 6 12s6-7.5 6-12c0-3.3-2.7-6-6-6z"
+        strokeLinejoin="round"
+      />
+      {!filled ? <circle cx="12" cy="8" r="2.2" /> : null}
+    </svg>
+  );
+}
+
 function PinButton() {
   const theme = useTheme();
   const dock = useDock();
@@ -339,7 +365,7 @@ function PinButton() {
       aria-pressed={pinned}
       onClick={() => setDock({ mode: pinned ? 'window' : 'pinned' })}
     >
-      {pinned ? '📌' : '📍'}
+      <PinIcon filled={pinned} />
     </button>
   );
 }
