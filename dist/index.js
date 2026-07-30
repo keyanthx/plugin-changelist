@@ -746,7 +746,15 @@ const CSS = `
 .change-frame > .change-frame-body,
 .change-overlay .change-modal-body {
   overflow-y: auto !important;
-  overflow-x: hidden !important;
+  /*
+   * auto, not hidden. Hidden made anything past the right edge unreachable
+   * rather than merely untidy — which is how a narrow dock silently swallowed
+   * half of Settings. The rules further down mean this should never trigger;
+   * if some future content genuinely cannot fit, it stays reachable.
+   */
+  overflow-x: auto !important;
+  /* Lets @container rules below respond to the dock's width. */
+  container-type: inline-size;
   /*
    * Stack the contents, whatever the host says. Ship Studio's header styles its
    * descendants as toolbar rows, and a stray display:flex here lays the capture
@@ -846,6 +854,10 @@ const CSS = `
   font-family: inherit;
   outline: none;
   box-sizing: border-box;
+  /* An input's intrinsic min-content width is wide, and as a flex item its
+     automatic minimum size holds it there no matter what the width property
+     says. Without this the dock can't narrow without pushing content off. */
+  min-width: 0;
 }
 
 .change-textarea {
@@ -910,7 +922,7 @@ const CSS = `
 
 /* -------------------------------------------------------- quick capture */
 
-.change-capture { display: flex; gap: 8px; margin-bottom: 6px; }
+.change-capture { display: flex; gap: 8px; margin-bottom: 6px; min-width: 0; }
 .change-capture-hint { font-size: 11px; margin-bottom: 16px; }
 
 /* ---------------------------------------------------------------- lists */
@@ -1041,6 +1053,17 @@ const CSS = `
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Any row of buttons. Wraps, because .change-btn is nowrap and a row of three
+   is wider than a narrow dock — the one thing still overflowing at 260px. */
+.change-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 .change-spacer { flex: 1; }
 
@@ -1067,10 +1090,14 @@ const CSS = `
 
 .change-warning { font-size: 11.5px; padding: 8px 10px; border-radius: 6px; line-height: 1.5; }
 
-.change-radio-row { display: flex; gap: 6px; }
+/* Wraps rather than squeezing: two preset buttons don't fit side by side in a
+   narrow dock, and stacking them reads far better than compressing both. */
+.change-radio-row { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .change-radio {
-  flex: 1;
+  flex: 1 1 120px;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 8px 10px;
   border-radius: 6px;
   cursor: pointer;
@@ -1083,10 +1110,40 @@ const CSS = `
 /* ------------------------------------------------------------- settings */
 
 .change-settings { display: flex; flex-direction: column; gap: 16px; }
-.change-settings-note { font-size: 11.5px; line-height: 1.6; }
+.change-settings-note { font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
 .change-settings-grid { display: flex; flex-direction: column; gap: 9px; }
-.change-settings-row { display: flex; align-items: center; gap: 9px; }
+.change-settings-row { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .change-settings-key { font-size: 11px; width: 58px; flex: none; font-weight: 600; }
+
+/* Indented to line up under its difficulty label. The container query below
+   removes this when the label moves above the field instead. */
+.change-command-input { margin-left: 67px; width: calc(100% - 67px); }
+
+/*
+ * A narrow layout for the dock.
+ *
+ * The panel's width comes from the dock, not the window, so media queries would
+ * be asking the wrong question — @container asks the right one. Everything here
+ * is refinement: the min-width and wrapping rules above already stop content
+ * being clipped, so a webview without container query support degrades to a
+ * cramped-but-complete panel rather than a broken one.
+ */
+@container (max-width: 320px) {
+  /* Label above the field, instead of stealing 58px beside it.
+     !important because the host-CSS defence above pins these rows to
+     flex-direction: row — our own two rules would otherwise fight, and the
+     narrow layout has to win. */
+  .change-frame .change-settings-row {
+    flex-direction: column !important;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .change-settings-key { width: auto; }
+  .change-command-input { margin-left: 0; width: 100%; }
+
+  /* One preset per line — half of a narrow dock is unreadable. */
+  .change-radio { flex-basis: 100%; }
+}
 `;
 function injectStyles() {
   if (document.getElementById(STYLE_ID)) return;
@@ -1765,17 +1822,14 @@ function ItemEditor({
   ))), pendingTemplate ? /* @__PURE__ */ ShipReact$3.createElement(
     "div",
     {
-      className: "change-warning",
+      className: "change-warning change-button-row",
       style: {
         background: "rgba(127, 127, 127, 0.12)",
         color: theme.textSecondary,
-        marginTop: 8,
-        display: "flex",
-        alignItems: "center",
-        gap: 10
+        marginTop: 8
       }
     },
-    /* @__PURE__ */ ShipReact$3.createElement("span", { style: { flex: 1 } }, "Replace what you’ve written with the ", pendingTemplate.label, " template?"),
+    /* @__PURE__ */ ShipReact$3.createElement("span", { style: { flex: "1 1 140px", minWidth: 0 } }, "Replace what you’ve written with the ", pendingTemplate.label, " template?"),
     /* @__PURE__ */ ShipReact$3.createElement(
       "button",
       {
@@ -1817,7 +1871,7 @@ function ItemEditor({
     /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-field-label", style: { color: theme.textMuted, marginBottom: 0 } }, "Suggested rewrite"),
     /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-diff-text" }, suggestion.prompt),
     /* @__PURE__ */ ShipReact$3.createElement("div", { style: { fontSize: 11, color: theme.textMuted } }, "Also sets difficulty to", " ", /* @__PURE__ */ ShipReact$3.createElement("strong", { style: { color: difficultyColor(suggestion.difficulty, theme) } }, DIFFICULTY_LABELS[suggestion.difficulty]), suggestion.title && suggestion.title !== item.title ? /* @__PURE__ */ ShipReact$3.createElement(ShipReact$3.Fragment, null, " ", "and the title to “", suggestion.title, "”") : null, "."),
-    /* @__PURE__ */ ShipReact$3.createElement("div", { style: { display: "flex", gap: 8 } }, /* @__PURE__ */ ShipReact$3.createElement(
+    /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-button-row" }, /* @__PURE__ */ ShipReact$3.createElement(
       "button",
       {
         className: "change-btn",
@@ -1947,7 +2001,7 @@ function SendPanel({
       style: { background: "rgba(245, 158, 11, 0.12)", color: "var(--warning, #f59e0b)", marginTop: 8 }
     },
     "You have uncommitted changes. They’ll come along to the new branch — commit or stash them first if they belong where they are."
-  ) : null) : null), /* @__PURE__ */ ShipReact$2.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } }, /* @__PURE__ */ ShipReact$2.createElement(
+  ) : null) : null), /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-button-row" }, /* @__PURE__ */ ShipReact$2.createElement(
     "button",
     {
       className: "change-btn",
@@ -2189,17 +2243,14 @@ function SettingsView({
   })), pendingPreset ? /* @__PURE__ */ ShipReact$1.createElement(
     "div",
     {
-      className: "change-warning",
+      className: "change-warning change-button-row",
       style: {
         background: "rgba(127, 127, 127, 0.12)",
         color: theme.textSecondary,
-        marginTop: 8,
-        display: "flex",
-        alignItems: "center",
-        gap: 10
+        marginTop: 8
       }
     },
-    /* @__PURE__ */ ShipReact$1.createElement("span", { style: { flex: 1 } }, "Replace your edited commands with the ", pendingPreset.label, " defaults?"),
+    /* @__PURE__ */ ShipReact$1.createElement("span", { style: { flex: "1 1 140px", minWidth: 0 } }, "Replace your edited commands with the ", pendingPreset.label, " defaults?"),
     /* @__PURE__ */ ShipReact$1.createElement(
       "button",
       {
@@ -2249,8 +2300,8 @@ function SettingsView({
     ), /* @__PURE__ */ ShipReact$1.createElement("datalist", { id: listId }, options.map((model) => /* @__PURE__ */ ShipReact$1.createElement("option", { key: model, value: model })))) : null), /* @__PURE__ */ ShipReact$1.createElement(
       "input",
       {
-        className: "change-input change-mono",
-        style: { ...inputStyle, marginLeft: 67, width: "calc(100% - 67px)" },
+        className: "change-input change-mono change-command-input",
+        style: inputStyle,
         value: command,
         spellCheck: false,
         onChange: (event) => onChange({
@@ -2335,7 +2386,7 @@ function LayoutDiagnostics() {
       `content:  ${report2.contentTop}px`,
       `width:    ${dock.dockWidth}px`
     ].join("\n")
-  ), /* @__PURE__ */ ShipReact$1.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8 } }, /* @__PURE__ */ ShipReact$1.createElement(
+  ), /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-button-row", style: { marginTop: 8 } }, /* @__PURE__ */ ShipReact$1.createElement(
     "button",
     {
       className: "change-btn",

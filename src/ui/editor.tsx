@@ -167,17 +167,14 @@ export function ItemEditor({
 
         {pendingTemplate ? (
           <div
-            className="change-warning"
+            className="change-warning change-button-row"
             style={{
               background: 'rgba(127, 127, 127, 0.12)',
               color: theme.textSecondary,
               marginTop: 8,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
             }}
           >
-            <span style={{ flex: 1 }}>
+            <span style={{ flex: '1 1 140px', minWidth: 0 }}>
               Replace what you&rsquo;ve written with the {pendingTemplate.label} template?
             </span>
             <button
@@ -252,7 +249,7 @@ export function ItemEditor({
             ) : null}
             .
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="change-button-row">
             <button
               className="change-btn"
               style={{ background: theme.action, color: theme.actionText }}

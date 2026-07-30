@@ -116,7 +116,15 @@ export const CSS = `
 .change-frame > .change-frame-body,
 .change-overlay .change-modal-body {
   overflow-y: auto !important;
-  overflow-x: hidden !important;
+  /*
+   * auto, not hidden. Hidden made anything past the right edge unreachable
+   * rather than merely untidy — which is how a narrow dock silently swallowed
+   * half of Settings. The rules further down mean this should never trigger;
+   * if some future content genuinely cannot fit, it stays reachable.
+   */
+  overflow-x: auto !important;
+  /* Lets @container rules below respond to the dock's width. */
+  container-type: inline-size;
   /*
    * Stack the contents, whatever the host says. Ship Studio's header styles its
    * descendants as toolbar rows, and a stray display:flex here lays the capture
@@ -216,6 +224,10 @@ export const CSS = `
   font-family: inherit;
   outline: none;
   box-sizing: border-box;
+  /* An input's intrinsic min-content width is wide, and as a flex item its
+     automatic minimum size holds it there no matter what the width property
+     says. Without this the dock can't narrow without pushing content off. */
+  min-width: 0;
 }
 
 .change-textarea {
@@ -280,7 +292,7 @@ export const CSS = `
 
 /* -------------------------------------------------------- quick capture */
 
-.change-capture { display: flex; gap: 8px; margin-bottom: 6px; }
+.change-capture { display: flex; gap: 8px; margin-bottom: 6px; min-width: 0; }
 .change-capture-hint { font-size: 11px; margin-bottom: 16px; }
 
 /* ---------------------------------------------------------------- lists */
@@ -411,6 +423,17 @@ export const CSS = `
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Any row of buttons. Wraps, because .change-btn is nowrap and a row of three
+   is wider than a narrow dock — the one thing still overflowing at 260px. */
+.change-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 .change-spacer { flex: 1; }
 
@@ -437,10 +460,14 @@ export const CSS = `
 
 .change-warning { font-size: 11.5px; padding: 8px 10px; border-radius: 6px; line-height: 1.5; }
 
-.change-radio-row { display: flex; gap: 6px; }
+/* Wraps rather than squeezing: two preset buttons don't fit side by side in a
+   narrow dock, and stacking them reads far better than compressing both. */
+.change-radio-row { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .change-radio {
-  flex: 1;
+  flex: 1 1 120px;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 8px 10px;
   border-radius: 6px;
   cursor: pointer;
@@ -453,10 +480,40 @@ export const CSS = `
 /* ------------------------------------------------------------- settings */
 
 .change-settings { display: flex; flex-direction: column; gap: 16px; }
-.change-settings-note { font-size: 11.5px; line-height: 1.6; }
+.change-settings-note { font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
 .change-settings-grid { display: flex; flex-direction: column; gap: 9px; }
-.change-settings-row { display: flex; align-items: center; gap: 9px; }
+.change-settings-row { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .change-settings-key { font-size: 11px; width: 58px; flex: none; font-weight: 600; }
+
+/* Indented to line up under its difficulty label. The container query below
+   removes this when the label moves above the field instead. */
+.change-command-input { margin-left: 67px; width: calc(100% - 67px); }
+
+/*
+ * A narrow layout for the dock.
+ *
+ * The panel's width comes from the dock, not the window, so media queries would
+ * be asking the wrong question — @container asks the right one. Everything here
+ * is refinement: the min-width and wrapping rules above already stop content
+ * being clipped, so a webview without container query support degrades to a
+ * cramped-but-complete panel rather than a broken one.
+ */
+@container (max-width: 320px) {
+  /* Label above the field, instead of stealing 58px beside it.
+     !important because the host-CSS defence above pins these rows to
+     flex-direction: row — our own two rules would otherwise fight, and the
+     narrow layout has to win. */
+  .change-frame .change-settings-row {
+    flex-direction: column !important;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .change-settings-key { width: auto; }
+  .change-command-input { margin-left: 0; width: 100%; }
+
+  /* One preset per line — half of a narrow dock is unreadable. */
+  .change-radio { flex-basis: 100%; }
+}
 `;
 
 export function injectStyles(): void {

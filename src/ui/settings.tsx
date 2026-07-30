@@ -148,17 +148,14 @@ export function SettingsView({
 
         {pendingPreset ? (
           <div
-            className="change-warning"
+            className="change-warning change-button-row"
             style={{
               background: 'rgba(127, 127, 127, 0.12)',
               color: theme.textSecondary,
               marginTop: 8,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
             }}
           >
-            <span style={{ flex: 1 }}>
+            <span style={{ flex: '1 1 140px', minWidth: 0 }}>
               Replace your edited commands with the {pendingPreset.label} defaults?
             </span>
             <button
@@ -232,9 +229,12 @@ export function SettingsView({
                   ) : null}
                 </div>
 
+                {/* The indent is a class, not an inline style, so the narrow
+                    container query can drop it — inline styles can't be
+                    overridden by CSS. */}
                 <input
-                  className="change-input change-mono"
-                  style={{ ...inputStyle, marginLeft: 67, width: 'calc(100% - 67px)' }}
+                  className="change-input change-mono change-command-input"
+                  style={inputStyle}
                   value={command}
                   spellCheck={false}
                   onChange={(event) =>
@@ -378,7 +378,7 @@ function LayoutDiagnostics() {
         ].join('\n')}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+      <div className="change-button-row" style={{ marginTop: 8 }}>
         <button
           className="change-btn"
           style={{ background: 'transparent', color: theme.accent, border: `1px solid ${theme.border}` }}

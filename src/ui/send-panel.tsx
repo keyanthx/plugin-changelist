@@ -151,7 +151,7 @@ export function SendPanel({
           ) : null}
         </div>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="change-button-row">
           <button
             className="change-btn"
             style={{ background: theme.action, color: theme.actionText }}
