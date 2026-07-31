@@ -11,17 +11,25 @@ handoff a single click.
 ## How it works
 
 **Keep it in view.** The Change List button opens a small floating window you can
-drag anywhere. Hit the 📍 pin and it docks to the right edge, full height, and
-stays there — through closing the Plugins dropdown, switching around the app, and
+drag anywhere. Hit the pin and it docks to the right edge, full height, and stays
+there — through closing the Plugins dropdown, switching around the app, and
 restarts. Neither state dims Ship Studio behind it, so you carry on working while
 the list sits there. Unpin to get the floating window back.
 
 **Jot it down.** Type a title, press Enter. That's it — the prompt can wait.
 Each note quietly records the git branch you were on when you wrote it.
 
-**Write the prompt.** Open an item and you get three kinds of help:
+**Open it.** A change opens in place. The title becomes editable where it already
+sits, so there's no second field holding the same text, and everything else about
+that change is on one screen: how hard it is, what kind it is, the prompt, and
+how it will be sent.
 
-- **Tags** — six, each asking what that kind of change actually needs:
+### Writing the prompt
+
+Three kinds of help, in the order you meet them:
+
+- **Tags** — six of them in a dropdown, each asking what that kind of change
+  actually needs:
 
   | Tag | For | Boxes |
   |---|---|---|
@@ -34,18 +42,27 @@ Each note quietly records the git branch you were on when you wrote it.
 
   Every tag asks **where**, because "no page, section or file named" is the hint
   that fires most often. None asks more than five things — most items get sent
-  with no prompt at all, so every extra box is friction. **Leave any of them
-  blank** — an empty box contributes nothing. The
-  prompt is assembled from what you filled in, by plain string joining, so what
-  the preview shows is exactly what gets sent. Click the active template again
-  to go back to writing freehand.
+  with no prompt at all, so every extra box is friction.
 
-  Switching template keeps values that still apply — `where` means the same
-  thing in a bug report and a restyle — and never touches your free text.
+  Each box carries its own label in its placeholder (`Where — home page, or the
+  file`) rather than in a caption above it; five captions cost a third of the
+  panel's height for text the placeholder already says. The label is still what
+  goes into the prompt, and it stays available as a tooltip once you've typed.
+
+  **The first three boxes show; the rest fold behind `▸ 2 more`.** They open
+  themselves the moment any of them holds something, so a filled box can never
+  sit hidden behind a fold.
+
+  **Leave any box blank** — an empty box contributes nothing. The prompt is
+  assembled from what you filled in, by plain string joining, so what the
+  preview shows is exactly what gets sent. Pick *No tag* to write freehand.
+
+  Switching tag keeps values that still apply — `where` means the same thing in
+  a bug report and a restyle — and never touches your free text.
 
 - **Your own tags** — Settings → *Your own tags* → **+ New tag**. A tag is a name
   and a few boxes; give each box a name and optionally an example, and it appears
-  as a chip beside the built-in ones and behaves identically. They're stored
+  in the dropdown under *Your tags* and behaves identically. They're stored
   globally rather than per project, since a tag set describes how *you* work
   rather than one site. Deleting a tag never touches the items that used it —
   their prompt and free text stay exactly as they were.
@@ -55,9 +72,11 @@ Each note quietly records the git branch you were on when you wrote it.
   offers a rewritten prompt you can accept or discard. It also suggests a
   difficulty. Hidden when its CLI isn't on the PATH; everything else still works.
 
-**Send it.** Each change is tagged Easy, Normal or Hard, and each level maps to a
-command you control. Both presets start the agent **in plan mode**, seeded with
-your prompt, so it proposes before it edits:
+### Sending it
+
+Each change is tagged Easy, Normal or Hard, and each level maps to a command you
+control. Both presets start the agent **in plan mode**, seeded with your prompt,
+so it proposes before it edits:
 
 | Difficulty | Claude Code | OpenCode |
 |---|---|---|
@@ -65,9 +84,14 @@ your prompt, so it proposes before it edits:
 | Normal | `… --model sonnet {prompt}` | `… --model opencode-go/glm-5.2 --prompt {prompt}` |
 | Hard | `… --model opus {prompt}` | `… --model opencode-go/kimi-k3 --prompt {prompt}` |
 
-Press ▶ and the plugin builds that command with your prompt quoted into it, copies
-it, and focuses the terminal. Paste, press enter — a fresh agent in plan mode on
-the model you chose.
+The send options are part of the open change, always visible — the destination,
+the exact command line, and the branch checkbox. Nothing about a send is hidden
+behind a control you have to find first.
+
+Press **Copy and focus terminal** (or ▶ on a collapsed row for the same thing
+without opening it) and the plugin builds that command with your prompt quoted
+into it, copies it, and focuses the terminal. Paste, press enter — a fresh agent
+in plan mode on the model you chose.
 
 ### Paste it at a shell prompt
 
@@ -78,10 +102,10 @@ If a tab is already running an agent, its input box belongs to that agent — th
 whole line arrives as a *chat message*, the flags do nothing, and you get the
 session's original model with no error to tell you so.
 
-The second mode, **Message a running agent**, copies just the prompt for exactly
-that case. It's honest about the consequence: the difficulty → model routing only
-applies at launch, so a running session keeps the model it started with. Whether
-you can fix that afterwards depends on the tool:
+The second mode, **Running agent**, copies just the prompt for exactly that case.
+It's honest about the consequence: the difficulty → model routing only applies at
+launch, so a running session keeps the model it started with. Whether you can fix
+that afterwards depends on the tool:
 
 | | Change model mid-session? |
 |---|---|
@@ -140,9 +164,13 @@ on both tools and cannot edit your files.
 ### Branches
 
 Optionally, sending an item first creates a git branch named after it. This is
-off by default, and never silent: the ⌄ options panel shows the branch name
+off by default, and never silent: the send options show the branch name
 (editable), the exact command, and a warning if you have uncommitted changes that
-would come along. If the branch already exists it switches to it instead.
+would come along. If the branch already exists it switches to it instead. The
+suggested name follows the title until you edit it yourself, then stays put.
+
+With branch creation switched on, ▶ on a collapsed row opens the change instead
+of sending, so a `git checkout` never runs without the name on screen.
 
 The plugin never commits and never pushes.
 
@@ -203,6 +231,31 @@ resize listener that re-measures the layout ignores flagged events — otherwise
 each apply schedules another apply, and "Undo" is instantly reverted by the
 resize it just fired.
 
+## Fitting a narrow dock
+
+The dock can be dragged down to 260px, which is narrower than most of what a
+form wants to be. Two things keep it usable:
+
+- **Container queries, not media queries.** The panel's width comes from the
+  dock, not the window, so `@container` asks the right question. Below 320px the
+  settings rows put their label above the field instead of beside it.
+- **Height is a budget.** An open change was once 866px tall in a 384px panel —
+  2.3 screens for one item. Placeholder labels, the three-box fold, the tag
+  dropdown sharing a row with difficulty, and an auto-growing prompt box brought
+  it to ~460px, so a change fits on one screen. If you add to that view, measure
+  it: `document.querySelector('.change-editor').getBoundingClientRect().height`.
+
+There is also a defensive block at the top of `src/styles.ts`. The panel renders
+inside Ship Studio's workspace header, and host rules written for toolbar
+children match our elements too — one of them forced `overflow-y: hidden` on the
+panel body and made Settings unscrollable with content overflowing by 254px.
+The rules there restate our own layout with enough specificity to win. It's the
+one place `!important` is correct: we're protecting a component's behaviour
+inside a subtree whose CSS we neither control nor can anticipate.
+
+`src/styles.ts` is one big template literal — **a backtick in a comment ends the
+string**. That has broken the build twice.
+
 ## What it can't do
 
 Ship Studio gives plugins no way to type into the terminal or start an agent —
@@ -213,8 +266,10 @@ you press enter.
 ## Where the data lives
 
 `{project}/.shipstudio/plugins/changelist/storage.json` — one JSON blob per
-project, gitignored by Ship Studio's templates. Nothing leaves your machine
-except what your chosen CLI sends when you press ✨ Improve.
+project, gitignored by Ship Studio's templates. Your own tags and the dock's
+position live in `localStorage` instead, because they describe how you work
+rather than one project. Nothing leaves your machine except what your chosen CLI
+sends when you press ✨ Improve.
 
 ## A flag asymmetry worth not "fixing"
 
@@ -237,6 +292,7 @@ asserts them so the asymmetry doesn't get tidied away later.
 npm install
 npm run preview   # the UI in a browser, no Ship Studio and no network needed
 npm test          # the pure layers: model, quoting, branch names, nudges, parsing
+npm run typecheck
 npm run build     # writes dist/index.js — commit it
 ```
 
@@ -251,11 +307,10 @@ production — keep all of them, because each one hides a class of bug otherwise
    the publish slot can be toggled off — so the pin feature is tested against
    the conditions that would break it.
 
-Console
-helpers (`changeReset()`, `changeFlag('no-claude')`, `changeFlag('no-opencode')`,
-`changeFlag('branch-fails')`, `changeFlag('branch-exists')`,
-`changeFlag('claude-garbles')`, `changeFlag('dirty-repo')`) drive the paths that
-are awkward to reach by hand.
+Console helpers (`changeReset()`, `changeFlag('no-claude')`,
+`changeFlag('no-opencode')`, `changeFlag('branch-fails')`,
+`changeFlag('branch-exists')`, `changeFlag('claude-garbles')`,
+`changeFlag('dirty-repo')`) drive the paths that are awkward to reach by hand.
 
 Then in Ship Studio: **Plugins → Plugin Manager → Link Dev Plugin** and pick this
 folder. After each change, rebuild and hit **Reload** on the plugin's row.
@@ -267,6 +322,11 @@ React is deliberately **not** bundled — it comes from
 grep -c 'ReactCurrentDispatcher\|react-dom/client' dist/index.js   # must be 0
 ```
 
+Only `useState`, `useEffect`, `useRef`, `useCallback` and `useMemo` may be
+imported from `react`; the build rewrites that import to a shim over the host's
+copy. JSX uses the classic transform, so there is no `react/jsx-runtime` to
+resolve.
+
 ## Layout
 
 | File | What's in it |
@@ -277,15 +337,23 @@ grep -c 'ReactCurrentDispatcher\|react-dom/client' dist/index.js   # must be 0
 | `src/agents.ts` | The CLI registry — flags, presets, model handling. The only file that knows a tool's syntax |
 | `src/catalogue.ts` | Reads each CLI's own model list and effort levels, so nothing is hardcoded |
 | `src/model.ts` | The item and settings shapes, the storage schema guard, list operations |
+| `src/templates.ts` | The six tags, as boxes to fill in, and the prompt assembly |
+| `src/customTags.ts` | Tags you define yourself, stored globally |
 | `src/send.ts` | Shell quoting, command assembly, branch-name slugs |
 | `src/lint.ts` | The live nudges |
-| `src/templates.ts` | The five prompt skeletons |
 | `src/ai.ts` | ✨ Improve — the one-shot call and the parsing of its reply |
 | `src/git.ts` | The one git mutation: create-or-switch branch |
-| `src/ui/` | Presentational pieces |
+| `src/cli.ts` | Is this binary on the PATH? |
+| `src/clipboard.ts` | Copying, with the fallbacks a webview needs |
+| `src/context.ts` | Typed access to the plugin context and theme |
+| `src/diagnostics.ts` | Read-only measurement of the panel, for when there are no devtools |
+| `src/styles.ts` | Every rule, including the host-CSS defences |
+| `src/ui/` | Presentational pieces — `row`, `editor`, `send-panel`, `settings`, `parts` |
 
-`agents.ts`, `model.ts`, `send.ts`, `lint.ts`, `templates.ts` and the parsing half
-of `ai.ts` are pure, and covered by `test/`.
+`agents.ts`, `catalogue.ts`, `model.ts`, `send.ts`, `lint.ts`, `templates.ts`,
+`customTags.ts`, `git.ts`, `hostLayout.ts` and the parsing half of `ai.ts` are
+pure, and covered by `test/` — 176 tests, run with Node's own test runner
+against the TypeScript sources directly.
 
 Adding a third CLI is one entry in `AGENT_CLIS` — its flags, its plan-mode form,
 and how to invoke it headlessly. Nothing in `ui/` needs to change.
