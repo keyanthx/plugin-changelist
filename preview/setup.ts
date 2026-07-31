@@ -49,6 +49,10 @@ const FLAGS = {
   get dirtyRepo() {
     return localStorage.getItem('change-preview-dirty-repo') === '1';
   },
+  /** Makes every work branch appear deleted, so the "mark done?" strip shows. */
+  get branchGone() {
+    return localStorage.getItem('change-preview-branch-gone') === '1';
+  },
 };
 
 function ok(stdout: string) {
@@ -172,6 +176,13 @@ async function exec(command: string, args: string[]) {
 
   if (command === 'git' && args[0] === 'check-ignore') return ok('');
 
+  // Does a work branch still exist? The panel asks this once on open so it can
+  // offer "mark done" for a branch that was merged and deleted.
+  if (command === 'git' && args[0] === 'branch' && args[1] === '--list') {
+    const name = args[2];
+    return FLAGS.branchGone ? ok('') : ok(`  ${name}`);
+  }
+
   // ✨ Improve. The real CLI takes ~20s; the delay here keeps the spinner honest.
   if (command === 'claude' && args[0] === '-p') {
     await new Promise((resolve) => setTimeout(resolve, 900));
@@ -283,6 +294,7 @@ w.__SHIPSTUDIO_PLUGIN_CONTEXT__ = makeContext();
  *   changeFlag('branch-exists')  make `checkout -b` refuse, so it switches
  *   changeFlag('claude-garbles') make Improve return something unparseable
  *   changeFlag('dirty-repo')     show the uncommitted-changes warning
+ *   changeFlag('branch-gone')    make work branches appear deleted
  *
  * Each `changeFlag` call toggles and reloads.
  */

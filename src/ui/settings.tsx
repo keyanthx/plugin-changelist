@@ -467,6 +467,18 @@ export function SettingsView({
           A new agent means pasting the command at a <strong>shell prompt</strong> in a normal
           terminal tab — that&rsquo;s the only way the model in the command applies.
         </div>
+
+        <label className="change-check" style={{ color: theme.textPrimary, marginTop: 9 }}>
+          <input
+            type="checkbox"
+            checked={settings.showCopiedText}
+            onChange={(event) => onChange({ showCopiedText: event.target.checked })}
+          />
+          Show the full text that will be copied when a change is expanded
+        </label>
+        <div className="change-settings-note" style={{ color: theme.textMuted, marginTop: 4 }}>
+          Off by default — the exact command stays hidden until you send.
+        </div>
       </Field>
 
       <Field label="Branches">

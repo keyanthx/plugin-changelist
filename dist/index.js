@@ -218,6 +218,12 @@ async function createOrSwitchBranch(shell, rawName) {
     message: created.stderr.trim() || `Could not create branch ${name2}.`
   };
 }
+async function branchExists(shell, name2) {
+  const trimmed = name2.trim();
+  if (!trimmed) return false;
+  const result = await shell.exec("git", ["branch", "--list", trimmed], { timeout: 30 }).catch(() => ({ stdout: "", stderr: "", exit_code: 1 }));
+  return result.stdout.trim().length > 0;
+}
 async function readBranchPrefix(ctx) {
   var _a;
   const projectPath = (_a = ctx.project) == null ? void 0 : _a.path;
@@ -247,6 +253,7 @@ const DEFAULT_SETTINGS = {
   },
   sendMode: "launch",
   createBranch: false,
+  showCopiedText: false,
   branchPrefix: "",
   improveCli: "claude",
   improveModel: "haiku",
@@ -321,6 +328,7 @@ function readStored(raw) {
       },
       sendMode: storedSettings.sendMode === "prompt-only" ? "prompt-only" : "launch",
       createBranch: storedSettings.createBranch === true,
+      showCopiedText: storedSettings.showCopiedText === true,
       branchPrefix: asString(storedSettings.branchPrefix, DEFAULT_SETTINGS.branchPrefix),
       improveCli: storedSettings.improveCli === "opencode" ? "opencode" : "claude",
       improveModel: asString(storedSettings.improveModel, DEFAULT_SETTINGS.improveModel),
@@ -393,21 +401,86 @@ function groupItems(items) {
     done: items.filter((item) => item.status === "done")
   };
 }
+function shouldDeferQuickSend(item, currentBranch, createBranch) {
+  if (createBranch) return true;
+  return shouldShowBranch(branchForItem(item), currentBranch);
+}
+function doingItemsWithBranches(items) {
+  return items.filter((item) => item.status === "doing" && item.workBranch);
+}
+function nextSelectableItem(items, selectedId, direction) {
+  const doing = items.filter((item) => item.status === "doing");
+  const todo = items.filter((item) => item.status === "todo");
+  const actionable = [...doing, ...todo];
+  if (actionable.length === 0) return null;
+  if (!selectedId) {
+    return direction > 0 ? actionable[0].id : actionable[actionable.length - 1].id;
+  }
+  const index = actionable.findIndex((item) => item.id === selectedId);
+  if (index === -1) {
+    return direction > 0 ? actionable[0].id : actionable[actionable.length - 1].id;
+  }
+  const next = index + direction;
+  if (next < 0 || next >= actionable.length) return selectedId;
+  return actionable[next].id;
+}
 const DIFFICULTY_LABELS = {
   easy: "Easy",
   normal: "Normal",
   hard: "Hard"
 };
+function itemsToMarkdown(items) {
+  if (items.length === 0) return "Nothing to do.";
+  const groups = groupItems(items);
+  const sections = [
+    ["In progress", groups.doing, false],
+    ["To do", groups.todo, false],
+    ["Done", groups.done, true]
+  ];
+  const blocks = [];
+  for (const [heading, list, done] of sections) {
+    if (list.length === 0) continue;
+    blocks.push(`## ${heading}
+${list.map((item) => itemToMarkdown(item, done)).join("\n")}`);
+  }
+  return blocks.join("\n\n");
+}
+function itemToMarkdown(item, done) {
+  const title = item.title.trim() || "Untitled change";
+  const branch = branchForItem(item);
+  const meta = [DIFFICULTY_LABELS[item.difficulty], branch ? `on ${branch}` : null].filter(Boolean).join(" · ");
+  const head = `- [${done ? "x" : " "}] **${title}**${meta ? ` · ${meta}` : ""}`;
+  const prompt = item.prompt.trim();
+  if (!prompt) return head;
+  return `${head}
+  ${prompt.replace(/\n/g, "\n  ")}`;
+}
 const STORAGE_KEY$1 = "shipstudio-changelist-dock";
 const MIN_DOCK_WIDTH = 260;
 const MAX_DOCK_WIDTH = 720;
+const MIN_WINDOW_WIDTH = MIN_DOCK_WIDTH;
+const MAX_WINDOW_WIDTH = MAX_DOCK_WIDTH;
+const MIN_WINDOW_HEIGHT = 160;
+const MAX_WINDOW_HEIGHT = 1e3;
 function clampWidth(width) {
   if (!Number.isFinite(width)) return 360;
   return Math.round(Math.min(MAX_DOCK_WIDTH, Math.max(MIN_DOCK_WIDTH, width)));
 }
+function clampWinWidth(width) {
+  if (!Number.isFinite(width)) return 380;
+  return Math.round(Math.min(MAX_WINDOW_WIDTH, Math.max(MIN_WINDOW_WIDTH, width)));
+}
+function clampWinHeight(height) {
+  if (!Number.isFinite(height)) return MIN_WINDOW_HEIGHT;
+  return Math.round(Math.min(MAX_WINDOW_HEIGHT, Math.max(MIN_WINDOW_HEIGHT, height)));
+}
 function getEffectiveDockWidth() {
   const half = Math.max(MIN_DOCK_WIDTH, Math.round(window.innerWidth / 2));
   return Math.min(state.dockWidth, half);
+}
+function getEffectiveWinHeight() {
+  if (state.winHeight === null) return null;
+  return Math.min(state.winHeight, window.innerHeight - 8);
 }
 function defaultState() {
   return {
@@ -415,7 +488,9 @@ function defaultState() {
     mode: "window",
     x: Math.max(16, window.innerWidth - 420),
     y: 92,
-    dockWidth: 360
+    dockWidth: 360,
+    winWidth: 380,
+    winHeight: null
   };
 }
 function load() {
@@ -430,7 +505,9 @@ function load() {
       mode: saved.mode === "pinned" ? "pinned" : "window",
       x: typeof saved.x === "number" ? saved.x : base.x,
       y: typeof saved.y === "number" ? saved.y : base.y,
-      dockWidth: clampWidth(typeof saved.dockWidth === "number" ? saved.dockWidth : base.dockWidth)
+      dockWidth: clampWidth(typeof saved.dockWidth === "number" ? saved.dockWidth : base.dockWidth),
+      winWidth: clampWinWidth(typeof saved.winWidth === "number" ? saved.winWidth : base.winWidth),
+      winHeight: typeof saved.winHeight === "number" ? clampWinHeight(saved.winHeight) : base.winHeight
     };
   } catch {
     return base;
@@ -453,12 +530,16 @@ function getDock() {
 function setDock(patch) {
   state = { ...state, ...patch };
   if (patch.dockWidth !== void 0) state.dockWidth = clampWidth(state.dockWidth);
+  if (patch.winWidth !== void 0) state.winWidth = clampWinWidth(state.winWidth);
+  if (patch.winHeight !== void 0) {
+    state.winHeight = patch.winHeight === null ? null : clampWinHeight(patch.winHeight);
+  }
   persist();
   emit();
 }
-function clampToViewport(x, y, width = 380) {
+function clampToViewport(x, y, width = 380, height) {
   const maxX = Math.max(0, window.innerWidth - Math.min(width, window.innerWidth) - 8);
-  const maxY = Math.max(0, window.innerHeight - 80);
+  const maxY = Math.max(0, window.innerHeight - (height ?? 80));
   return {
     x: Math.min(Math.max(8, x), maxX),
     y: Math.min(Math.max(8, y), maxY)
@@ -791,7 +872,8 @@ const CSS = `
   .change-row-open,
   .change-row-chevron,
   .change-dot,
-  .change-resize-handle {
+  .change-resize-handle,
+  .change-window-resize-handle {
     animation: none !important;
     transition: none !important;
   }
@@ -807,6 +889,11 @@ const CSS = `
  * open inline on their row.
  */
 .change-frame {
+  /* Every single-line control in the plugin shares this height, so buttons,
+     inputs, selects and radios line up whether they sit beside each other in a
+     row or in different panels of the same form. Text fields (the notes box
+     and multiline template boxes) opt out — they grow to fit their content. */
+  --change-control-height: 32px;
   position: fixed;
   z-index: 9990;
   display: flex;
@@ -868,6 +955,25 @@ const CSS = `
 }
 .change-frame-pinned:hover .change-resize-handle { opacity: 0.6; }
 .change-resize-handle:hover { opacity: 1 !important; }
+
+/*
+ * Bottom-right corner of the floating window, dragged to resize both
+ * dimensions. Sits above the body so it stays grabbable over scrolled content,
+ * and above the scrollbar so it doesn't share that strip with it.
+ */
+.change-window-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+  z-index: 2;
+}
+.change-frame:hover .change-window-resize-handle { opacity: 0.5; }
+.change-window-resize-handle:hover { opacity: 1 !important; }
 
 .change-frame-body {
   padding: 12px 13px 16px;
@@ -937,7 +1043,6 @@ const CSS = `
 .change-frame .change-tag-head,
 .change-frame .change-tag-box-row,
 .change-frame .change-send-modes,
-.change-frame .change-send-command,
 .change-frame .change-props-row {
   display: flex !important;
   flex-direction: row !important;
@@ -986,6 +1091,30 @@ const CSS = `
   min-width: 0;
 }
 
+/* Single-line inputs share the plugin's control height. The multiline
+   template boxes also carry .change-input, so they're excluded — see
+   .change-field-multiline below, which keeps its own growing height. The
+   auto-growing one-row fields are excluded too: .change-field-grow keeps its
+   own height so it can open up to show text that wraps. */
+.change-input:not(.change-field-multiline):not(.change-field-grow) {
+  height: var(--change-control-height);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* One-row fields that grow to show everything typed in them: start at control
+   height, wrap at the right edge and open up. auto-grow sets the height from
+   scrollHeight, so overflow-y must stay hidden and resize off or they'd fight
+   it. overflow-wrap makes even an unbroken string (a URL, a path) wrap instead
+   of running past the border. */
+.change-field-grow {
+  min-height: var(--change-control-height);
+  resize: none;
+  overflow-y: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
 .change-textarea {
   /* Starts small and grows to fit — see useAutoGrow in editor.tsx. It used to
      reserve 108px whether or not anything was written in it. resize is off
@@ -1010,6 +1139,12 @@ const CSS = `
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  /* Same height as the inputs and selects it sits beside. border-box keeps
+     the bordered variants (Discard, No, …) at exactly this height too. */
+  height: var(--change-control-height);
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 .change-btn:disabled { opacity: 0.5; cursor: default; }
 
@@ -1026,7 +1161,7 @@ const CSS = `
 .change-frame .change-btn > span { color: inherit; }
 
 .change-icon-btn {
-  background: none;
+  background: var(--change-btn-bg, none);
   border: none;
   cursor: pointer;
   padding: 5px 7px;
@@ -1037,6 +1172,10 @@ const CSS = `
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* Icon buttons match the other single-line controls now — they sit beside
+     .change-btn in the editor's action row, so a shorter one read as broken. */
+  height: var(--change-control-height);
+  box-sizing: border-box;
 }
 .change-icon-btn:hover { background: rgba(127, 127, 127, 0.16); }
 .change-icon-btn:disabled { opacity: 0.35; cursor: default; }
@@ -1083,7 +1222,7 @@ const CSS = `
 }
 
 .change-fold {
-  background: none;
+  background: var(--change-btn-bg, none);
   border: none;
   padding: 0;
   cursor: pointer;
@@ -1105,6 +1244,15 @@ const CSS = `
   animation: changeRowIn 0.16s ease-out;
   transition: opacity 0.14s ease-out, background 0.14s ease-out;
 }
+
+/*
+ * The in-progress row's buttons sit dark on the blue wash rather than letting
+ * the wash show through them. --change-btn-bg flips the value; every control
+ * that is transparent by default reads it with its usual colour as the
+ * fallback, so nothing changes outside a doing row and nothing needs
+ * !important (which would kill hover states).
+ */
+.change-row-doing { --change-btn-bg: var(--bg-secondary); }
 
 .change-row-main {
   display: flex;
@@ -1137,6 +1285,7 @@ const CSS = `
   border-radius: 5px;
   transition: background 0.12s ease-out;
 }
+.change-row-open { background: var(--change-btn-bg, none); }
 .change-row-open:hover { background: rgba(127, 127, 127, 0.10); }
 
 /* Content width, shrinking with an ellipsis when there isn't room, so the
@@ -1171,13 +1320,20 @@ const CSS = `
 .change-row-title-input {
   flex: 1 1 0;
   min-width: 0;
-  background: none;
+  background: var(--change-btn-bg, none);
   border: 1px solid transparent;
   border-radius: 5px;
   font: inherit;
   font-size: 13px;
   padding: 4px 5px;
   outline: none;
+  /* The one control in the row, so it lines up with the rest. It grows taller
+     once the title wraps, but never shorter than a single row. */
+  min-height: var(--change-control-height);
+  box-sizing: border-box;
+  resize: none;
+  overflow-y: hidden;
+  overflow-wrap: anywhere;
 }
 .change-row-title-input:hover { border-color: rgba(127, 127, 127, 0.3); }
 .change-row-title-input:focus { border-color: rgba(127, 127, 127, 0.55); }
@@ -1186,7 +1342,7 @@ const CSS = `
    row's other icon buttons so it stays an easy target. */
 .change-row-collapse {
   flex: none;
-  background: none;
+  background: var(--change-btn-bg, none);
   border: none;
   cursor: pointer;
   font: inherit;
@@ -1195,6 +1351,9 @@ const CSS = `
   padding: 6px 7px;
   border-radius: 5px;
   opacity: 0.75;
+  /* Sized like the row's other icon buttons so it stays an easy target. */
+  height: var(--change-control-height);
+  box-sizing: border-box;
 }
 .change-row-collapse:hover { background: rgba(127, 127, 127, 0.16); opacity: 1; }
 
@@ -1234,7 +1393,7 @@ const CSS = `
   border-radius: 50%;
   flex: none;
   border: 1.5px solid currentColor;
-  background: none;
+  background: var(--change-btn-bg, none);
   padding: 0;
   cursor: pointer;
   transition: background 0.14s ease-out, transform 0.14s ease-out;
@@ -1268,7 +1427,9 @@ const CSS = `
    the three difficulty buttons into something unreadable. */
 .change-props-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .change-props-row .change-difficulty-row { flex: 1 1 145px; }
-.change-tag-select { flex: 1 1 96px; }
+.change-tag-select {
+  flex: 1 1 96px;
+}
 
 /*
  * The template's boxes, in a panel of their own.
@@ -1336,6 +1497,11 @@ const CSS = `
   cursor: pointer;
   outline: none;
   box-sizing: border-box;
+  /* One control height for every single-line element — a select beside an
+     input or button must be the same height as them. */
+  height: var(--change-control-height);
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 /* Effort is the narrower of the pair — its values are single short words. */
@@ -1400,30 +1566,6 @@ const CSS = `
   text-overflow: ellipsis;
 }
 
-/* The command as one truncated line, the whole thing a click away. */
-.change-send-command {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-.change-send-caret { flex: none; font-size: 9px; }
-.change-send-command-text {
-  flex: 1;
-  min-width: 0;
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .change-send-note { font-size: 11px; line-height: 1.5; margin-top: 6px; overflow-wrap: anywhere; }
 
 .change-code {
@@ -1440,6 +1582,14 @@ const CSS = `
 .change-check { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
 
 .change-warning { font-size: 11.5px; padding: 8px 10px; border-radius: 6px; line-height: 1.5; }
+
+.change-warning code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  padding: 0 3px;
+  background: rgba(127, 127, 127, 0.18);
+  border-radius: 4px;
+}
 
 /* Wraps rather than squeezing: two preset buttons don't fit side by side in a
    narrow dock, and stacking them reads far better than compressing both. */
@@ -1476,6 +1626,18 @@ const CSS = `
   text-align: left;
   font-family: inherit;
   line-height: 1.45;
+  /* The single-line radios (difficulty, send modes, send-mode setting) share
+     the plugin's control height. The settings' agent-CLI preset buttons are
+     two lines of content, so :has(br) below restores their natural height. */
+  height: var(--change-control-height);
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.change-radio:has(br) {
+  height: auto;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 /* ------------------------------------------------------------- settings */
@@ -1880,14 +2042,6 @@ function PanelFrame({
   const dragOffset = useRef(null);
   const bodyRef = useRef(null);
   useWheelFallback(bodyRef);
-  useEffect(() => {
-    if (pinned) return;
-    const onKey = (event) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, pinned]);
   const startDrag = useCallback(
     (event) => {
       if (pinned) return;
@@ -1897,7 +2051,10 @@ function PanelFrame({
         const offset = dragOffset.current;
         if (!offset) return;
         move.preventDefault();
-        setDock(clampToViewport(move.clientX - offset.dx, move.clientY - offset.dy));
+        const live = getDock();
+        setDock(
+          clampToViewport(move.clientX - offset.dx, move.clientY - offset.dy, live.winWidth, getEffectiveWinHeight())
+        );
       };
       const onUp = () => {
         dragOffset.current = null;
@@ -1916,7 +2073,16 @@ function PanelFrame({
     right: 0,
     top: contentTop,
     height: Math.max(160, viewportHeight - contentTop)
-  } : { width: 380, left: dock.x, top: dock.y, maxHeight: "min(70vh, 620px)" };
+  } : (() => {
+    const winHeight = getEffectiveWinHeight();
+    return {
+      width: Math.min(dock.winWidth, window.innerWidth - 16),
+      left: dock.x,
+      top: dock.y,
+      maxHeight: winHeight === null ? "min(70vh, 620px)" : void 0,
+      height: winHeight ?? void 0
+    };
+  })();
   return /* @__PURE__ */ ShipReact$5.createElement(
     "div",
     {
@@ -1948,7 +2114,7 @@ function PanelFrame({
       ))
     ),
     /* @__PURE__ */ ShipReact$5.createElement("div", { className: "change-frame-body", ref: bodyRef }, children),
-    pinned ? /* @__PURE__ */ ShipReact$5.createElement(DockResizeHandle, null) : null
+    pinned ? /* @__PURE__ */ ShipReact$5.createElement(DockResizeHandle, null) : /* @__PURE__ */ ShipReact$5.createElement(WindowResizeHandle, null)
   );
 }
 function useWheelFallback(ref) {
@@ -2008,6 +2174,77 @@ function getFrameOrigin(headerElement) {
   const frame = headerElement.closest(".change-frame");
   const rect = (frame ?? headerElement).getBoundingClientRect();
   return { x: rect.left, y: rect.top };
+}
+function WindowResizeHandle() {
+  const theme = useTheme();
+  const startResize = useCallback(
+    (event) => {
+      event.preventDefault();
+      const origin = getFrameOrigin(event.currentTarget);
+      const onMove = (move) => {
+        const width = Math.max(0, move.clientX - origin.x);
+        const height = Math.max(0, move.clientY - origin.y);
+        setDock({
+          winWidth: width,
+          winHeight: height
+        });
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    []
+  );
+  return /* @__PURE__ */ ShipReact$5.createElement(
+    "div",
+    {
+      className: "change-window-resize-handle",
+      style: { background: theme.border },
+      title: "Drag to resize",
+      onMouseDown: startResize
+    }
+  );
+}
+function useAutoGrow(ref, value) {
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  }, [ref, value]);
+}
+function AutoGrowTextarea({
+  value,
+  onChange,
+  onKeyDown,
+  className,
+  style,
+  placeholder,
+  ariaLabel,
+  title,
+  spellCheck
+}) {
+  const ref = useRef(null);
+  useAutoGrow(ref, value);
+  return /* @__PURE__ */ ShipReact$5.createElement(
+    "textarea",
+    {
+      ref,
+      rows: 1,
+      className,
+      style,
+      value,
+      placeholder,
+      "aria-label": ariaLabel,
+      title,
+      spellCheck,
+      onChange,
+      onKeyDown
+    }
+  );
 }
 function PinIcon({ filled }) {
   return /* @__PURE__ */ ShipReact$5.createElement(
@@ -2118,15 +2355,21 @@ function ItemRow({
      * beside it takes over as the collapse control.
      */
     /* @__PURE__ */ ShipReact$4.createElement(ShipReact$4.Fragment, null, /* @__PURE__ */ ShipReact$4.createElement(
-      "input",
+      AutoGrowTextarea,
       {
-        className: "change-row-title-input",
+        className: "change-row-title-input change-field-grow",
         style: { color: theme.textPrimary },
         value: item.title,
         placeholder: "What needs changing?",
-        "aria-label": "Title",
+        ariaLabel: "Title",
         spellCheck: false,
-        onChange: (event) => onTitleChange(event.target.value)
+        onChange: (event) => onTitleChange(event.target.value),
+        onKeyDown: (event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+        }
       }
     ), /* @__PURE__ */ ShipReact$4.createElement(
       "button",
@@ -2204,6 +2447,7 @@ function SendPanel({
   item,
   settings,
   branchPrefix,
+  currentBranch,
   hasUncommittedChanges,
   busy,
   onSend
@@ -2212,11 +2456,12 @@ function SendPanel({
   const [mode, setMode] = useState(settings.sendMode);
   const [createBranch, setCreateBranch] = useState(settings.createBranch);
   const [editedBranchName, setEditedBranchName] = useState(null);
-  const [showCommand, setShowCommand] = useState(false);
   const branchName = editedBranchName ?? item.workBranch ?? suggestBranchName(item.title, branchPrefix);
   const clipboardText = buildClipboardText(item, settings, mode);
   const branchOk = !createBranch || isValidBranchName(branchName);
   const hasPrompt = Boolean(item.prompt.trim() || item.title.trim());
+  const itemBranch = branchForItem(item);
+  const branchMismatch = !createBranch && currentBranch !== null && currentBranch !== "" && shouldShowBranch(itemBranch, currentBranch);
   const commandForItem = settings.commands[item.difficulty];
   const binary = commandForItem.trim().split(/\s+/)[0] ?? "";
   const cli = findAgentCli(binary === "opencode" ? "opencode" : "claude");
@@ -2247,30 +2492,36 @@ function SendPanel({
         onClick: () => setMode("prompt-only")
       }
     )),
-    /* @__PURE__ */ ShipReact$3.createElement("div", null, /* @__PURE__ */ ShipReact$3.createElement(
-      "button",
-      {
-        className: "change-send-command",
-        style: { color: theme.textMuted },
-        "aria-expanded": showCommand,
-        title: showCommand ? "Hide the full text" : "Show the full text",
-        onClick: () => setShowCommand(!showCommand)
-      },
-      /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-send-caret", "aria-hidden": "true" }, showCommand ? "▾" : "▸"),
-      /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-send-command-text change-mono", style: { color: theme.textSecondary } }, clipboardText || "(nothing to send — give this change a title or a prompt first)")
-    ), showCommand ? /* @__PURE__ */ ShipReact$3.createElement(
+    settings.showCopiedText ? /* @__PURE__ */ ShipReact$3.createElement(
       "div",
       {
         className: "change-code change-mono",
         style: {
           background: theme.bgSecondary,
           color: theme.textSecondary,
-          border: `1px solid ${theme.border}`,
-          marginTop: 6
+          border: `1px solid ${theme.border}`
         }
       },
       clipboardText || "(nothing to send — give this change a title or a prompt first)"
-    ) : null, mode === "prompt-only" ? /* @__PURE__ */ ShipReact$3.createElement(ModelWarning, { cli, switching, targetModel }) : null),
+    ) : null,
+    mode === "prompt-only" ? /* @__PURE__ */ ShipReact$3.createElement(ModelWarning, { cli, switching, targetModel }) : null,
+    branchMismatch ? /* @__PURE__ */ ShipReact$3.createElement(
+      "div",
+      {
+        className: "change-warning",
+        style: {
+          background: "rgba(245, 158, 11, 0.12)",
+          color: "var(--warning, #f59e0b)",
+          marginTop: 7
+        }
+      },
+      "This note belongs to ",
+      /* @__PURE__ */ ShipReact$3.createElement("code", null, itemBranch),
+      " — you’re on",
+      " ",
+      /* @__PURE__ */ ShipReact$3.createElement("code", null, currentBranch),
+      ". Without creating a branch, the agent works here."
+    ) : null,
     /* @__PURE__ */ ShipReact$3.createElement("div", null, /* @__PURE__ */ ShipReact$3.createElement("label", { className: "change-check", style: { color: theme.textPrimary } }, /* @__PURE__ */ ShipReact$3.createElement(
       "input",
       {
@@ -2335,7 +2586,7 @@ function ModelWarning({
       "button",
       {
         className: "change-btn",
-        style: { background: "transparent", color: theme.accent, border: `1px solid ${theme.border}` },
+        style: { background: "var(--change-btn-bg, transparent)", color: theme.accent, border: `1px solid ${theme.border}` },
         onClick: () => {
           void copyText(line).then((ok) => setCopied(ok));
         }
@@ -2356,7 +2607,7 @@ function ModeButton({
     {
       className: "change-radio",
       style: {
-        background: selected ? "rgba(127, 127, 127, 0.14)" : "transparent",
+        background: selected ? "var(--change-btn-bg, rgba(127, 127, 127, 0.14))" : "var(--change-btn-bg, transparent)",
         border: `1px solid ${selected ? theme.accent : theme.border}`,
         color: selected ? theme.textPrimary : theme.textSecondary,
         fontWeight: selected ? 600 : 400
@@ -2371,14 +2622,6 @@ function ModeButton({
 const ShipReact$2 = window.__SHIPSTUDIO_REACT__;
 const DIFFICULTIES$1 = ["easy", "normal", "hard"];
 const VISIBLE_FIELDS = 3;
-function useAutoGrow(ref, value) {
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    element.style.height = "auto";
-    element.style.height = `${element.scrollHeight}px`;
-  }, [ref, value]);
-}
 function ItemEditor({
   item,
   shell,
@@ -2391,9 +2634,11 @@ function ItemEditor({
   canMoveUp,
   canMoveDown,
   sending,
+  branchGone,
   onChange,
   onMove,
-  onDelete
+  onDelete,
+  onMarkDone
 }) {
   const theme = useTheme();
   const boxStyle = {
@@ -2479,7 +2724,7 @@ function ItemEditor({
         key: difficulty,
         className: "change-radio",
         style: {
-          background: selected ? "rgba(127, 127, 127, 0.14)" : "transparent",
+          background: selected ? "var(--change-btn-bg, rgba(127, 127, 127, 0.14))" : "var(--change-btn-bg, transparent)",
           border: `1px solid ${selected ? color : theme.border}`,
           color: selected ? color : theme.textSecondary,
           fontWeight: selected ? 600 : 400
@@ -2519,7 +2764,6 @@ function ItemEditor({
         style: boxStyle,
         value: item.fields[field.id] ?? "",
         placeholder: `${field.label} — ${field.placeholder}`,
-        "aria-label": field.label,
         title: field.label,
         spellCheck: false,
         onChange: (event) => setField(field.id, event.target.value)
@@ -2529,9 +2773,32 @@ function ItemEditor({
         {
           key: field.id,
           className: "change-input change-field-box change-field-multiline",
+          "aria-label": field.label,
           ...shared
         }
-      ) : /* @__PURE__ */ ShipReact$2.createElement("input", { key: field.id, className: "change-input change-field-box", ...shared });
+      ) : (
+        /*
+         * A one-row box that grows once the answer gets long: typed past
+         * the right edge, it wraps and opens up instead of hiding text.
+         * Enter closes the box (Shift+Enter for a line break), so it
+         * still behaves like a single-line field unless you ask for more.
+         */
+        /* @__PURE__ */ ShipReact$2.createElement(
+          AutoGrowTextarea,
+          {
+            key: field.id,
+            className: "change-input change-field-box change-field-grow",
+            ariaLabel: field.label,
+            ...shared,
+            onKeyDown: (event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+            }
+          }
+        )
+      );
     }),
     hiddenFields.length > 0 && !hiddenHaveValues ? /* @__PURE__ */ ShipReact$2.createElement(
       "button",
@@ -2599,7 +2866,7 @@ function ItemEditor({
       "button",
       {
         className: "change-btn",
-        style: { background: "transparent", color: theme.textMuted, border: `1px solid ${theme.border}` },
+        style: { background: "var(--change-btn-bg, transparent)", color: theme.textMuted, border: `1px solid ${theme.border}` },
         onClick: () => setSuggestion(null)
       },
       "Discard"
@@ -2610,15 +2877,38 @@ function ItemEditor({
       item,
       settings: sending.settings,
       branchPrefix: sending.branchPrefix,
+      currentBranch: sending.currentBranch,
       hasUncommittedChanges: sending.hasUncommittedChanges,
       busy: sending.busy,
       onSend: sending.onSend
     }
-  ), /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-editor-actions" }, improveAvailable ? /* @__PURE__ */ ShipReact$2.createElement(
+  ), branchGone ? /* @__PURE__ */ ShipReact$2.createElement(
+    "div",
+    {
+      className: "change-warning",
+      style: {
+        background: "rgba(245, 158, 11, 0.12)",
+        color: "var(--warning, #f59e0b)",
+        marginTop: 8
+      }
+    },
+    "Branch ",
+    /* @__PURE__ */ ShipReact$2.createElement("code", null, item.workBranch),
+    " no longer exists — likely merged.",
+    /* @__PURE__ */ ShipReact$2.createElement("div", { style: { marginTop: 6 } }, /* @__PURE__ */ ShipReact$2.createElement(
+      "button",
+      {
+        className: "change-btn",
+        style: { background: theme.action, color: theme.actionText },
+        onClick: onMarkDone
+      },
+      "Mark done"
+    ))
+  ) : null, /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-editor-actions" }, improveAvailable ? /* @__PURE__ */ ShipReact$2.createElement(
     "button",
     {
       className: "change-btn",
-      style: { background: "transparent", color: theme.accent, border: `1px solid ${theme.border}` },
+      style: { background: "var(--change-btn-bg, transparent)", color: theme.accent, border: `1px solid ${theme.border}` },
       disabled: improving || !item.prompt.trim() && !item.title.trim(),
       title: `Rewrite this prompt with ${cli.label}${improveModel ? ` (${improveModel})` : ""}`,
       onClick: () => void improve()
@@ -2638,7 +2928,7 @@ function ItemEditor({
     {
       className: "change-btn",
       style: {
-        background: "transparent",
+        background: "var(--change-btn-bg, transparent)",
         color: theme.textMuted,
         border: `1px solid ${theme.border}`,
         padding: "4px 9px"
@@ -3069,7 +3359,14 @@ function SettingsView({
       onClick: () => onChange({ sendMode: "prompt-only" })
     },
     "Message a running agent"
-  )), /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-note", style: { color: theme.textMuted, marginTop: 6 } }, "A new agent means pasting the command at a ", /* @__PURE__ */ ShipReact$1.createElement("strong", null, "shell prompt"), " in a normal terminal tab — that’s the only way the model in the command applies.")), /* @__PURE__ */ ShipReact$1.createElement(Field, { label: "Branches" }, /* @__PURE__ */ ShipReact$1.createElement("label", { className: "change-check", style: { color: theme.textPrimary, marginBottom: 9 } }, /* @__PURE__ */ ShipReact$1.createElement(
+  )), /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-note", style: { color: theme.textMuted, marginTop: 6 } }, "A new agent means pasting the command at a ", /* @__PURE__ */ ShipReact$1.createElement("strong", null, "shell prompt"), " in a normal terminal tab — that’s the only way the model in the command applies."), /* @__PURE__ */ ShipReact$1.createElement("label", { className: "change-check", style: { color: theme.textPrimary, marginTop: 9 } }, /* @__PURE__ */ ShipReact$1.createElement(
+    "input",
+    {
+      type: "checkbox",
+      checked: settings.showCopiedText,
+      onChange: (event) => onChange({ showCopiedText: event.target.checked })
+    }
+  ), "Show the full text that will be copied when a change is expanded"), /* @__PURE__ */ ShipReact$1.createElement("div", { className: "change-settings-note", style: { color: theme.textMuted, marginTop: 4 } }, "Off by default — the exact command stays hidden until you send.")), /* @__PURE__ */ ShipReact$1.createElement(Field, { label: "Branches" }, /* @__PURE__ */ ShipReact$1.createElement("label", { className: "change-check", style: { color: theme.textPrimary, marginBottom: 9 } }, /* @__PURE__ */ ShipReact$1.createElement(
     "input",
     {
       type: "checkbox",
@@ -3376,9 +3673,12 @@ function Panel({ onClose }) {
   const [hydrated, setHydrated] = useState(false);
   const [view, setView] = useState("list");
   const [expandedId, setExpandedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+  const [deadBranchIds, setDeadBranchIds] = useState(/* @__PURE__ */ new Set());
   const [sending, setSending] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const captureRef = useRef(null);
   const [justSentId, setJustSentId] = useState(null);
   const [installedClis, setInstalledClis] = useState({});
   const [detectedPrefix, setDetectedPrefix] = useState("");
@@ -3408,7 +3708,16 @@ function Panel({ onClose }) {
         restored.settings.improveCli = "opencode";
         restored.settings.improveModel = openCodeCli.defaultImproveModel;
       }
+      const gone = /* @__PURE__ */ new Set();
+      const checks = doingItemsWithBranches(restored.items).map(async (item) => {
+        if (item.workBranch && !await branchExists(context.shell, item.workBranch)) {
+          gone.add(item.id);
+        }
+      });
+      await Promise.all(checks);
+      if (cancelled) return;
       setStored(restored);
+      setDeadBranchIds(gone);
       setDetectedPrefix(prefix);
       setInstalledClis(found);
       setHydrated(true);
@@ -3444,6 +3753,14 @@ function Panel({ onClose }) {
   }, []);
   const patchSettings = useCallback((patch) => {
     setStored((previous) => ({ ...previous, settings: { ...previous.settings, ...patch } }));
+  }, []);
+  const copyListAsMarkdown = useCallback(async () => {
+    const copied = await copyText(itemsToMarkdown(storedRef.current.items));
+    const context = ctxRef.current;
+    context == null ? void 0 : context.actions.showToast(
+      copied ? "List copied as Markdown" : "Could not reach the clipboard. Open the list and copy by hand.",
+      copied ? "success" : "error"
+    );
   }, []);
   const addFromDraft = useCallback(() => {
     var _a, _b;
@@ -3504,15 +3821,104 @@ function Panel({ onClose }) {
   );
   const quickSend = useCallback(
     (item) => {
+      var _a, _b;
       const settings = storedRef.current.settings;
-      if (settings.createBranch) {
+      const currentBranch2 = ((_b = (_a = ctxRef.current) == null ? void 0 : _a.project) == null ? void 0 : _b.currentBranch) ?? null;
+      if (shouldDeferQuickSend(item, currentBranch2, settings.createBranch)) {
         setExpandedId(item.id);
+        setSelectedId(item.id);
         return;
       }
       void performSend(item, { mode: settings.sendMode, createBranch: false, branchName: "" });
     },
     [performSend]
   );
+  const moveSelection = useCallback((direction) => {
+    setSelectedId((current) => nextSelectableItem(storedRef.current.items, current, direction));
+  }, []);
+  useEffect(() => {
+    if (!selectedId) return;
+    const item = stored.items.find((entry) => entry.id === selectedId);
+    if (!item || item.status === "done") setSelectedId(null);
+  }, [stored.items, selectedId]);
+  useEffect(() => {
+    const onKey = (event) => {
+      var _a, _b;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      if (target == null ? void 0 : target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (view === "settings") {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setView("list");
+        }
+        return;
+      }
+      const findSelected = () => selectedId ? storedRef.current.items.find((item) => item.id === selectedId) : void 0;
+      switch (event.key) {
+        case "Escape": {
+          event.preventDefault();
+          if (expandedId) setExpandedId(null);
+          else if (getDock().mode === "window") setDock({ open: false });
+          break;
+        }
+        case "n":
+          event.preventDefault();
+          (_b = (_a = captureRef.current) == null ? void 0 : _a.querySelector("textarea")) == null ? void 0 : _b.focus();
+          break;
+        case "j":
+        case "ArrowDown":
+          event.preventDefault();
+          moveSelection(1);
+          requestAnimationFrame(() => {
+            var _a2;
+            (_a2 = document.querySelector(".change-row-selected")) == null ? void 0 : _a2.scrollIntoView({ block: "nearest" });
+          });
+          break;
+        case "k":
+        case "ArrowUp":
+          event.preventDefault();
+          moveSelection(-1);
+          requestAnimationFrame(() => {
+            var _a2;
+            (_a2 = document.querySelector(".change-row-selected")) == null ? void 0 : _a2.scrollIntoView({ block: "nearest" });
+          });
+          break;
+        case "Enter": {
+          const item = findSelected();
+          if (!item || item.status === "done") break;
+          event.preventDefault();
+          const next = expandedId === item.id ? null : item.id;
+          setExpandedId(next);
+          if (next) {
+            requestAnimationFrame(() => {
+              const titleInput = document.querySelector(
+                ".change-row-expanded .change-row-title-input"
+              );
+              titleInput == null ? void 0 : titleInput.focus();
+            });
+          }
+          break;
+        }
+        case "s": {
+          const item = findSelected();
+          if (!item || item.status === "done") break;
+          event.preventDefault();
+          quickSend(item);
+          break;
+        }
+        case "d": {
+          const item = findSelected();
+          if (!item || item.status === "done") break;
+          event.preventDefault();
+          toggleDone(item);
+          break;
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expandedId, moveSelection, quickSend, selectedId, toggleDone, view]);
   if (!(ctx == null ? void 0 : ctx.project)) {
     return /* @__PURE__ */ ShipReact.createElement(PanelFrame, { title: "Change List", onClose }, /* @__PURE__ */ ShipReact.createElement("div", { className: "change-empty", style: { color: theme.textMuted } }, "Open a project first.", /* @__PURE__ */ ShipReact.createElement("br", null), "Each project keeps its own list of changes."));
   }
@@ -3523,11 +3929,12 @@ function Panel({ onClose }) {
   const improveAvailable = installedClis[stored.settings.improveCli] === true;
   const customTemplates = customTags.filter(isUsable).map(toTemplate);
   const sendingFor = (item) => {
-    var _a;
+    var _a, _b;
     return {
       settings: stored.settings,
       branchPrefix: effectivePrefix,
-      hasUncommittedChanges: ((_a = ctx.project) == null ? void 0 : _a.hasUncommittedChanges) ?? false,
+      currentBranch: ((_a = ctx.project) == null ? void 0 : _a.currentBranch) ?? null,
+      hasUncommittedChanges: ((_b = ctx.project) == null ? void 0 : _b.hasUncommittedChanges) ?? false,
       busy: sending,
       onSend: (options) => void performSend(item, options)
     };
@@ -3538,15 +3945,18 @@ function Panel({ onClose }) {
       "div",
       {
         key: item.id,
-        className: `change-row${expandedId === item.id ? " change-row-expanded" : ""}${justSentId === item.id ? " change-row-sent" : ""}`,
+        className: `change-row${expandedId === item.id ? " change-row-expanded" : ""}${justSentId === item.id ? " change-row-sent" : ""}${item.status === "doing" ? " change-row-doing" : ""}${selectedId === item.id ? " change-row-selected" : ""}`,
         style: {
-          background: theme.bgSecondary,
+          // The item in flight gets a faint blue fill — colour-mix tints the
+          // row's own background with the accent, so it follows the theme
+          // and stays subtle instead of a saturated bar on the left edge.
+          background: item.status === "doing" ? `color-mix(in srgb, ${theme.accent} 10%, ${theme.bgSecondary})` : theme.bgSecondary,
           border: `1px solid ${expandedId === item.id ? theme.accent : theme.border}`,
-          // An accent edge on the item currently in flight, so the eye lands
-          // on what you're working on. Inset shadow rather than a border so
-          // it doesn't fight the border above.
-          ...item.status === "doing" ? { boxShadow: `inset 3px 0 0 ${theme.accent}` } : null
-        }
+          // The selection bar reads as "this one is selected" without
+          // fighting the accent border that marks the expanded row.
+          boxShadow: selectedId === item.id ? `inset 3px 0 0 0 ${theme.accent}` : void 0
+        },
+        onClick: () => setSelectedId(item.id)
       },
       /* @__PURE__ */ ShipReact.createElement(
         ItemRow,
@@ -3574,12 +3984,14 @@ function Panel({ onClose }) {
           canMoveUp: index > 0,
           canMoveDown: index < items.length - 1,
           sending: sendingFor(item),
+          branchGone: deadBranchIds.has(item.id),
           onChange: (patch) => patchItem(item.id, patch),
           onMove: (direction) => setItems((current) => moveItem(current, item.id, direction)),
           onDelete: () => {
             setItems((current) => removeItem(current, item.id));
             setExpandedId(null);
-          }
+          },
+          onMarkDone: () => toggleDone(item)
         }
       ) : null
     );
@@ -3590,7 +4002,7 @@ function Panel({ onClose }) {
     {
       title: settingsView ? "Settings" : /* @__PURE__ */ ShipReact.createElement(ShipReact.Fragment, null, "Change List", openCount > 0 ? /* @__PURE__ */ ShipReact.createElement("span", { style: { color: theme.textMuted, fontWeight: 400 } }, " · ", openCount, " open") : null),
       onClose,
-      headerExtra: settingsView ? /* @__PURE__ */ ShipReact.createElement(IconButton, { label: "Back to the list", onClick: () => setView("list") }, "← Back") : /* @__PURE__ */ ShipReact.createElement(IconButton, { label: "Settings", onClick: () => setView("settings") }, "⚙")
+      headerExtra: settingsView ? /* @__PURE__ */ ShipReact.createElement(IconButton, { label: "Back to the list", onClick: () => setView("list") }, "← Back") : /* @__PURE__ */ ShipReact.createElement(ShipReact.Fragment, null, /* @__PURE__ */ ShipReact.createElement(IconButton, { label: "Copy the list as Markdown", onClick: () => void copyListAsMarkdown() }, /* @__PURE__ */ ShipReact.createElement("svg", { width: "15", height: "15", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2" }, /* @__PURE__ */ ShipReact.createElement("rect", { x: "9", y: "9", width: "11", height: "11", rx: "1.5" }), /* @__PURE__ */ ShipReact.createElement("path", { d: "M5 15V5a1.5 1.5 0 0 1 1.5-1.5H15", strokeLinecap: "round" }))), /* @__PURE__ */ ShipReact.createElement(IconButton, { label: "Settings", onClick: () => setView("settings") }, "⚙"))
     },
     settingsView ? /* @__PURE__ */ ShipReact.createElement(
       SettingsView,
@@ -3603,10 +4015,10 @@ function Panel({ onClose }) {
         onCustomTagsChange: updateCustomTags,
         onChange: patchSettings
       }
-    ) : /* @__PURE__ */ ShipReact.createElement(ShipReact.Fragment, null, /* @__PURE__ */ ShipReact.createElement("div", { className: "change-capture" }, /* @__PURE__ */ ShipReact.createElement(
-      "input",
+    ) : /* @__PURE__ */ ShipReact.createElement(ShipReact.Fragment, null, /* @__PURE__ */ ShipReact.createElement("div", { className: "change-capture", ref: captureRef }, /* @__PURE__ */ ShipReact.createElement(
+      AutoGrowTextarea,
       {
-        className: "change-input",
+        className: "change-input change-field-grow",
         style: {
           background: theme.bgSecondary,
           color: theme.textPrimary,
@@ -3617,7 +4029,10 @@ function Panel({ onClose }) {
         spellCheck: false,
         onChange: (event) => setDraft(event.target.value),
         onKeyDown: (event) => {
-          if (event.key === "Enter") addFromDraft();
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            addFromDraft();
+          }
         }
       }
     ), /* @__PURE__ */ ShipReact.createElement(

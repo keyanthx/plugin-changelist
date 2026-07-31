@@ -13,7 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readBranchPrefix } from '../src/git.ts';
+import { branchExists, readBranchPrefix } from '../src/git.ts';
 
 /** A plugin context stub that records every invoke it receives. */
 function makeCtx({ project = { path: '/repo/site' }, respond = () => 'feat' } = {}) {
@@ -83,4 +83,40 @@ test('an unrecognised reply shape yields no prefix', async () => {
     const { ctx } = makeCtx({ respond: () => reply });
     assert.equal(await readBranchPrefix(ctx), '');
   }
+});
+
+// ------------------------------------------------------- branchExists
+
+function makeShell(stdout, exitCode = 0) {
+  const calls = [];
+  const shell = {
+    calls,
+    exec: async (command, args) => {
+      calls.push({ command, args });
+      return { stdout, stderr: '', exit_code: exitCode };
+    },
+  };
+  return shell;
+}
+test('a branch that git still lists exists', async () => {
+  const shell = makeShell('  feat/hero');
+  assert.equal(await branchExists(shell, 'feat/hero'), true);
+  assert.deepEqual(shell.calls, [{ command: 'git', args: ['branch', '--list', 'feat/hero'] }]);
+});
+
+test('a deleted branch is reported as gone', async () => {
+  // `git branch --list` prints nothing when the branch doesn't exist.
+  const shell = makeShell('');
+  assert.equal(await branchExists(shell, 'feat/hero'), false);
+});
+
+test('a failed git call counts as gone rather than throwing', async () => {
+  const shell = makeShell('', 1);
+  assert.equal(await branchExists(shell, 'feat/hero'), false);
+});
+
+test('a blank name is gone without asking git', async () => {
+  const shell = makeShell('  feat/hero');
+  assert.equal(await branchExists(shell, '  '), false);
+  assert.equal(shell.calls.length, 0);
 });

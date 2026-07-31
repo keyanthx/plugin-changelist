@@ -161,6 +161,33 @@ on both tools and cannot edit your files.
 **Track it.** Items move To do → In progress → Done. Done items fold away into a
 `Done (n)` section rather than disappearing.
 
+Done-ness is otherwise a manual call, but the panel does notice the one case it
+can: when a `doing` item's work branch has been merged and deleted, opening the
+panel asks git once and offers **Mark done** in the change. A finished item
+doesn't rot in In progress.
+
+**Copy the backlog.** The header's copy button turns the whole list into
+Markdown — In progress / To do / Done, each row its checkbox, difficulty,
+branch and prompt — for pasting into a PR body, an issue, or a running agent
+that needs the backlog rather than one prompt.
+
+### Working the list by keyboard
+
+The panel is a list of things to do, so it takes the usual keys. Typing in a
+field is never hijacked, and a ⌘/Ctrl chord is left alone:
+
+| Key | What it does |
+|---|---|
+| `n` | focus the capture box |
+| `j` / `k` (or ↓ / ↑) | move the selection |
+| `Enter` | open or close the selected change |
+| `s` | send the selected change (through the same gates as ▶) |
+| `d` | mark the selected change done |
+| `Escape` | close the open change, then close the floating window — never the pinned dock |
+
+Selection follows the visible list — In progress first, then To do — and an
+item that leaves those rows (done, deleted) stops being selected.
+
 ### Branches
 
 Optionally, sending an item first creates a git branch named after it. This is
@@ -171,6 +198,12 @@ suggested name follows the title until you edit it yourself, then stays put.
 
 With branch creation switched on, ▶ on a collapsed row opens the change instead
 of sending, so a `git checkout` never runs without the name on screen.
+
+There is a sibling guard for the case where you *don't* create a branch. A note
+taken on `feat/hero` but sent from `main` would hand the agent the wrong
+working tree, so the send options warn when the current branch isn't where the
+note belongs, and ▶ on a collapsed row opens the change instead of sending —
+work never silently lands on a branch the note wasn't about.
 
 The plugin never commits and never pushes.
 
@@ -310,7 +343,8 @@ production — keep all of them, because each one hides a class of bug otherwise
 Console helpers (`changeReset()`, `changeFlag('no-claude')`,
 `changeFlag('no-opencode')`, `changeFlag('branch-fails')`,
 `changeFlag('branch-exists')`, `changeFlag('claude-garbles')`,
-`changeFlag('dirty-repo')`) drive the paths that are awkward to reach by hand.
+`changeFlag('dirty-repo')`, `changeFlag('branch-gone')`) drive the paths that
+are awkward to reach by hand.
 
 Then in Ship Studio: **Plugins → Plugin Manager → Link Dev Plugin** and pick this
 folder. After each change, rebuild and hit **Reload** on the plugin's row.
@@ -337,6 +371,7 @@ resolve.
 | `src/agents.ts` | The CLI registry — flags, presets, model handling. The only file that knows a tool's syntax |
 | `src/catalogue.ts` | Reads each CLI's own model list and effort levels, so nothing is hardcoded |
 | `src/model.ts` | The item and settings shapes, the storage schema guard, list operations |
+| `src/markdown.ts` | The whole list as Markdown, for a PR body or a running agent |
 | `src/templates.ts` | The six tags, as boxes to fill in, and the prompt assembly |
 | `src/customTags.ts` | Tags you define yourself, stored globally |
 | `src/send.ts` | Shell quoting, command assembly, branch-name slugs |

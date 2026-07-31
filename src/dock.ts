@@ -32,6 +32,15 @@ export interface DockState {
   y: number;
   /** Width of the right-hand dock when pinned. */
   dockWidth: number;
+  /** Width of the floating window when unpinned. */
+  winWidth: number;
+  /**
+   * Height of the floating window when unpinned. `null` means "auto": the
+   * frame grows with its content up to a max, the pre-resize behaviour. A
+   * number means the user has dragged it to a fixed height and the body
+   * scrolls instead.
+   */
+  winHeight: number | null;
 }
 
 const STORAGE_KEY = 'shipstudio-changelist-dock';
@@ -46,10 +55,33 @@ const STORAGE_KEY = 'shipstudio-changelist-dock';
 export const MIN_DOCK_WIDTH = 260;
 export const MAX_DOCK_WIDTH = 720;
 
+/**
+ * Bounds for the floating window's width and height.
+ *
+ * Width shares the dock's range — the same content lives in both. Height has
+ * its own, and is capped below the viewport at render time (see
+ * getEffectiveWinHeight) so a saved big window can't outlive the screen it was
+ * dragged on.
+ */
+export const MIN_WINDOW_WIDTH = MIN_DOCK_WIDTH;
+export const MAX_WINDOW_WIDTH = MAX_DOCK_WIDTH;
+export const MIN_WINDOW_HEIGHT = 160;
+export const MAX_WINDOW_HEIGHT = 1000;
+
 /** Bound the *stored preference*. Independent of the current window size. */
 function clampWidth(width: number): number {
   if (!Number.isFinite(width)) return 360;
   return Math.round(Math.min(MAX_DOCK_WIDTH, Math.max(MIN_DOCK_WIDTH, width)));
+}
+
+function clampWinWidth(width: number): number {
+  if (!Number.isFinite(width)) return 380;
+  return Math.round(Math.min(MAX_WINDOW_WIDTH, Math.max(MIN_WINDOW_WIDTH, width)));
+}
+
+function clampWinHeight(height: number): number {
+  if (!Number.isFinite(height)) return MIN_WINDOW_HEIGHT;
+  return Math.round(Math.min(MAX_WINDOW_HEIGHT, Math.max(MIN_WINDOW_HEIGHT, height)));
 }
 
 /**
@@ -65,6 +97,18 @@ export function getEffectiveDockWidth(): number {
   return Math.min(state.dockWidth, half);
 }
 
+/**
+ * The fixed height to actually use right now, or `null` for auto-grow.
+ *
+ * Like getEffectiveDockWidth, the *stored* preference is left alone: a window
+ * saved at 800px tall on a big screen is capped to the current viewport here,
+ * not silently shrunk forever.
+ */
+export function getEffectiveWinHeight(): number | null {
+  if (state.winHeight === null) return null;
+  return Math.min(state.winHeight, window.innerHeight - 8);
+}
+
 /** Sensible starting spot: near the top-right, clear of the header. */
 function defaultState(): DockState {
   return {
@@ -73,6 +117,8 @@ function defaultState(): DockState {
     x: Math.max(16, window.innerWidth - 420),
     y: 92,
     dockWidth: 360,
+    winWidth: 380,
+    winHeight: null,
   };
 }
 
@@ -96,6 +142,11 @@ function load(): DockState {
       x: typeof saved.x === 'number' ? saved.x : base.x,
       y: typeof saved.y === 'number' ? saved.y : base.y,
       dockWidth: clampWidth(typeof saved.dockWidth === 'number' ? saved.dockWidth : base.dockWidth),
+      winWidth: clampWinWidth(typeof saved.winWidth === 'number' ? saved.winWidth : base.winWidth),
+      winHeight:
+        typeof saved.winHeight === 'number'
+          ? clampWinHeight(saved.winHeight)
+          : base.winHeight,
     };
   } catch {
     return base;
@@ -124,6 +175,11 @@ export function getDock(): DockState {
 export function setDock(patch: Partial<DockState>): void {
   state = { ...state, ...patch };
   if (patch.dockWidth !== undefined) state.dockWidth = clampWidth(state.dockWidth);
+  if (patch.winWidth !== undefined) state.winWidth = clampWinWidth(state.winWidth);
+  if (patch.winHeight !== undefined) {
+    // null means auto-grow — only numbers get clamped.
+    state.winHeight = patch.winHeight === null ? null : clampWinHeight(patch.winHeight);
+  }
   persist();
   emit();
 }
@@ -132,11 +188,18 @@ export function setDock(patch: Partial<DockState>): void {
  * Keep the window on screen.
  *
  * Dragging it mostly off the edge and then reopening to an invisible panel is a
- * trap worth closing; the header stays reachable no matter what.
+ * trap worth closing; the header stays reachable no matter what. The optional
+ * width/height are the window's current size — clamped separately at render
+ * time via getEffectiveWinHeight, so passing the stored height is fine.
  */
-export function clampToViewport(x: number, y: number, width = 380): { x: number; y: number } {
+export function clampToViewport(
+  x: number,
+  y: number,
+  width = 380,
+  height?: number | null
+): { x: number; y: number } {
   const maxX = Math.max(0, window.innerWidth - Math.min(width, window.innerWidth) - 8);
-  const maxY = Math.max(0, window.innerHeight - 80);
+  const maxY = Math.max(0, window.innerHeight - (height ?? 80));
   return {
     x: Math.min(Math.max(8, x), maxX),
     y: Math.min(Math.max(8, y), maxY),

@@ -10,11 +10,14 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_SETTINGS,
   createItem,
+  doingItemsWithBranches,
   groupItems,
   moveItem,
+  nextSelectableItem,
   readStored,
   removeItem,
   setStatus,
+  shouldDeferQuickSend,
   updateItem,
 } from '../src/model.ts';
 
@@ -93,6 +96,12 @@ test('a blob written before OpenCode support keeps its commands and gains the ne
   assert.equal(settings.branchPrefix, 'feat/');
   assert.equal(settings.improveModel, 'sonnet');
   assert.equal(settings.improveCli, 'claude', 'new field takes its default');
+  assert.equal(settings.showCopiedText, false, 'preview hidden by default');
+});
+
+test('a stored showCopiedText value is preserved', () => {
+  const stored = { schema: 1, items: [], settings: { showCopiedText: true } };
+  assert.equal(readStored(stored).settings.showCopiedText, true);
 });
 
 test('an unknown improveCli value falls back rather than breaking Improve', () => {
@@ -270,4 +279,86 @@ test('a new item records the branch it was written on', () => {
   assert.equal(created.branchAtCapture, 'feat/hero');
   assert.equal(created.status, 'todo');
   assert.ok(created.id);
+});
+
+// ------------------------------------------------ the quick-send gate
+
+test('▶ defers to the editor when a branch would be created', () => {
+  // The branch name must be on screen before a git command runs.
+  const noBranch = { branchAtCapture: null, workBranch: null };
+  assert.equal(shouldDeferQuickSend(noBranch, 'main', true), true);
+});
+
+test('▶ defers when the note belongs to another branch', () => {
+  // Sending from here would hand the agent the wrong working tree.
+  const itemBranch = { branchAtCapture: 'feat/hero', workBranch: null };
+  assert.equal(shouldDeferQuickSend(itemBranch, 'main', false), true);
+});
+
+test('▶ sends straight away when the branches match', () => {
+  const itemBranch = { branchAtCapture: 'main', workBranch: null };
+  assert.equal(shouldDeferQuickSend(itemBranch, 'main', false), false);
+});
+
+test('▶ sends when there is no branch to worry about', () => {
+  const noBranch = { branchAtCapture: null, workBranch: null };
+  assert.equal(shouldDeferQuickSend(noBranch, 'main', false), false);
+});
+
+// -------------------------------------------------- dead-branch detection
+
+test('only items in flight with a work branch are worth checking', () => {
+  const items = [
+    item('doing-branch', { status: 'doing', workBranch: 'feat/x' }),
+    item('doing-plain', { status: 'doing', workBranch: null }),
+    item('todo-branch', { workBranch: 'feat/y' }),
+    item('done-branch', { status: 'done', workBranch: 'feat/z' }),
+  ];
+  assert.deepEqual(
+    doingItemsWithBranches(items).map((entry) => entry.id),
+    ['doing-branch']
+  );
+});
+
+// ------------------------------------------------------- keyboard selection
+
+test('selection walks only the actionable rows, doing group first', () => {
+  // Visual order is doing before todo regardless of array order.
+  const items = [
+    item('todo-a'),
+    item('doing-b', { status: 'doing' }),
+    item('done-c', { status: 'done' }),
+    item('todo-d'),
+  ];
+  assert.equal(nextSelectableItem(items, null, 1), 'doing-b', 'down starts at the first actionable');
+  assert.equal(nextSelectableItem(items, 'doing-b', 1), 'todo-a');
+  assert.equal(nextSelectableItem(items, 'todo-a', 1), 'todo-d');
+  assert.equal(nextSelectableItem(items, 'todo-d', 1), 'todo-d', 'clamps at the end');
+});
+
+test('selection moves up through the same order', () => {
+  const items = [
+    item('doing-b', { status: 'doing' }),
+    item('todo-a'),
+    item('todo-d'),
+    item('done-c', { status: 'done' }),
+  ];
+  assert.equal(nextSelectableItem(items, null, -1), 'todo-d', 'up from nothing lands on the last');
+  assert.equal(nextSelectableItem(items, 'todo-a', -1), 'doing-b');
+  assert.equal(nextSelectableItem(items, 'doing-b', -1), 'doing-b', 'clamps at the start');
+});
+
+test('selection skips done rows entirely', () => {
+  const items = [item('done-c', { status: 'done' }), item('todo-a')];
+  assert.equal(nextSelectableItem(items, null, 1), 'todo-a');
+});
+
+test('a stale selection behaves like none', () => {
+  const items = [item('todo-a')];
+  assert.equal(nextSelectableItem(items, 'vanished', 1), 'todo-a');
+});
+
+test('nothing selectable yields nothing', () => {
+  assert.equal(nextSelectableItem([], 'todo-a', 1), null);
+  assert.equal(nextSelectableItem([item('done-c', { status: 'done' })], null, 1), null);
 });

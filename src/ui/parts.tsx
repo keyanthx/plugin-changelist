@@ -13,7 +13,9 @@ import {
   MAX_DOCK_WIDTH,
   MIN_DOCK_WIDTH,
   clampToViewport,
+  getDock,
   getEffectiveDockWidth,
+  getEffectiveWinHeight,
   setDock,
   useDock,
 } from '../dock.ts';
@@ -48,17 +50,6 @@ export function PanelFrame({
   const bodyRef = useRef<HTMLDivElement | null>(null);
   useWheelFallback(bodyRef);
 
-  useEffect(() => {
-    // Escape closes the floating window, but never the pinned dock — the dock
-    // is furniture, and Escape is for dismissing transient things.
-    if (pinned) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, pinned]);
-
   /**
    * Dragging is wired on the window rather than per-pointer-event on the header
    * so the drag survives the pointer briefly outting the header, and always ends
@@ -74,7 +65,14 @@ export function PanelFrame({
         const offset = dragOffset.current;
         if (!offset) return;
         move.preventDefault();
-        setDock(clampToViewport(move.clientX - offset.dx, move.clientY - offset.dy));
+        // Track the window's current size so dragging after a resize clamps
+        // against the right edges, not the 380px default. Read live from the
+        // dock module: this callback was created once and must not hold a
+        // stale copy of the state.
+        const live = getDock();
+        setDock(
+          clampToViewport(move.clientX - offset.dx, move.clientY - offset.dy, live.winWidth, getEffectiveWinHeight())
+        );
       };
       const onUp = () => {
         dragOffset.current = null;
@@ -119,7 +117,18 @@ export function PanelFrame({
         top: contentTop,
         height: Math.max(160, viewportHeight - contentTop),
       }
-    : { width: 380, left: dock.x, top: dock.y, maxHeight: 'min(70vh, 620px)' };
+    : (() => {
+        // max-height is only the auto-grow cap — it would cap a user-dragged
+        // height too, so it comes off the moment a fixed height is set.
+        const winHeight = getEffectiveWinHeight();
+        return {
+          width: Math.min(dock.winWidth, window.innerWidth - 16),
+          left: dock.x,
+          top: dock.y,
+          maxHeight: winHeight === null ? 'min(70vh, 620px)' : undefined,
+          height: winHeight ?? undefined,
+        };
+      })();
 
   return (
     <div
@@ -153,7 +162,7 @@ export function PanelFrame({
       <div className="change-frame-body" ref={bodyRef}>
         {children}
       </div>
-      {pinned ? <DockResizeHandle /> : null}
+      {pinned ? <DockResizeHandle /> : <WindowResizeHandle />}
     </div>
   );
 }
@@ -269,6 +278,116 @@ function getFrameOrigin(headerElement: HTMLElement): { x: number; y: number } {
   const frame = headerElement.closest('.change-frame') as HTMLElement | null;
   const rect = (frame ?? headerElement).getBoundingClientRect();
   return { x: rect.left, y: rect.top };
+}
+
+/**
+ * Resize the floating window from its bottom-right corner.
+ *
+ * The mirror of DockResizeHandle: same window-level listeners so the drag
+ * survives the pointer leaving the handle, but here the corner moves, so the
+ * new width/height come from the pointer's absolute position, not the distance
+ * to an edge. Once a height is set it stops auto-growing; the body scrolls.
+ */
+function WindowResizeHandle() {
+  const theme = useTheme();
+
+  const startResize = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      const origin = getFrameOrigin(event.currentTarget as HTMLElement);
+
+      const onMove = (move: MouseEvent) => {
+        const width = Math.max(0, move.clientX - origin.x);
+        const height = Math.max(0, move.clientY - origin.y);
+        setDock({
+          winWidth: width,
+          winHeight: height,
+        });
+        // The frame is anchored at top-left, so only the corner moves while
+        // dragging; getEffectiveWinHeight caps the stored height to the
+        // viewport at render, so the bottom edge can't fall off-screen.
+      };
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    []
+  );
+
+  return (
+    <div
+      className="change-window-resize-handle"
+      style={{ background: theme.border }}
+      title="Drag to resize"
+      onMouseDown={startResize}
+    />
+  );
+}
+
+/**
+ * Grow a textarea to fit its content instead of scrolling inside itself.
+ *
+ * The free-text box used to reserve a fixed height whether or not you wrote
+ * anything, which is a lot of empty space in a docked panel. Starting small and
+ * growing costs nothing when the box is empty and gives more room than before
+ * when the text is long. `AutoGrowTextarea` applies it to the one-row fields
+ * (title, capture, template boxes) so typing past the width wraps and widens the
+ * box instead of disappearing past its edge.
+ */
+export function useAutoGrow(ref: React.RefObject<HTMLTextAreaElement | null>, value: string) {
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    // Collapse first, or scrollHeight only ever reports the current height and
+    // the box could grow but never shrink again.
+    element.style.height = 'auto';
+    element.style.height = `${element.scrollHeight}px`;
+  }, [ref, value]);
+}
+
+/** A single-line-looking field that wraps and grows once the text gets long. */
+export function AutoGrowTextarea({
+  value,
+  onChange,
+  onKeyDown,
+  className,
+  style,
+  placeholder,
+  ariaLabel,
+  title,
+  spellCheck,
+}: {
+  value: string;
+  onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  className: string;
+  style?: React.CSSProperties;
+  placeholder?: string;
+  ariaLabel?: string;
+  title?: string;
+  spellCheck?: boolean;
+}) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useAutoGrow(ref, value);
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      className={className}
+      style={style}
+      value={value}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      title={title}
+      spellCheck={spellCheck}
+      onChange={onChange}
+      onKeyDown={onKeyDown}
+    />
+  );
 }
 
 /**
