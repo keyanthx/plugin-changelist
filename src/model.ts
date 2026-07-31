@@ -380,8 +380,3 @@ export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
   hard: 'Hard',
 };
 
-/** Cycles easy → normal → hard → easy, for the click-to-change chip. */
-export function nextDifficulty(current: Difficulty): Difficulty {
-  const index = DIFFICULTIES.indexOf(current);
-  return DIFFICULTIES[(index + 1) % DIFFICULTIES.length];
-}

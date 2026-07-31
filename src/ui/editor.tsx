@@ -10,7 +10,7 @@
  * re-reads storage while the modal is open, so nothing can overwrite what you
  * are typing.
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { findAgentCli } from '../agents.ts';
 import { improveWithAgent, type ImprovedPrompt } from '../ai.ts';
 import { useTheme } from '../context.ts';
@@ -19,14 +19,60 @@ import {
   DIFFICULTY_LABELS,
   type ChangeItem,
   type Difficulty,
+  type Settings,
   type TemplateId,
 } from '../model.ts';
-import { allTemplates, composePrompt, findTemplate, type Template } from '../templates.ts';
+import {
+  TEMPLATES,
+  composePrompt,
+  findTemplate,
+  hasAnyFieldValue,
+  type Template,
+} from '../templates.ts';
 import type { Shell } from '../types.ts';
 import { IconButton, Spinner } from './parts.tsx';
 import { difficultyColor } from './row.tsx';
+import { SendPanel, type SendOptions } from './send-panel.tsx';
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard'];
+
+/**
+ * How many of a tag's boxes are shown before the rest fold away.
+ *
+ * The templates are written most-important-first — see the note in
+ * templates.ts — so the first three are the ones worth asking every time. The
+ * rest are still one click away, and open themselves if they hold anything.
+ */
+const VISIBLE_FIELDS = 3;
+
+/**
+ * Grow a textarea to fit its content instead of scrolling inside itself.
+ *
+ * The free-text box used to reserve 108px whether or not you wrote anything,
+ * which is a lot of empty space in a docked panel. Starting small and growing
+ * costs nothing when the box is empty and gives more room than before when the
+ * prompt is long.
+ */
+function useAutoGrow(ref: React.RefObject<HTMLTextAreaElement | null>, value: string) {
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    // Collapse first, or scrollHeight only ever reports the current height and
+    // the box could grow but never shrink again.
+    element.style.height = 'auto';
+    element.style.height = `${element.scrollHeight}px`;
+  }, [ref, value]);
+}
+
+/** Everything the send section needs that isn't already on the item itself. */
+export interface SendingProps {
+  settings: Settings;
+  /** Settings prefix, or Ship Studio's own preference when that's empty. */
+  branchPrefix: string;
+  hasUncommittedChanges: boolean;
+  busy: boolean;
+  onSend: (options: SendOptions) => void;
+}
 
 export function ItemEditor({
   item,
@@ -39,6 +85,7 @@ export function ItemEditor({
   customTemplates,
   canMoveUp,
   canMoveDown,
+  sending,
   onChange,
   onMove,
   onDelete,
@@ -57,6 +104,12 @@ export function ItemEditor({
   customTemplates: Template[];
   canMoveUp: boolean;
   canMoveDown: boolean;
+  /**
+   * How to send this item. The section is part of the editor and always
+   * visible in it — opening a change shows you what will be sent and lets you
+   * send it, rather than hiding that behind a second control.
+   */
+  sending: SendingProps;
   onChange: (patch: Partial<ChangeItem>) => void;
   onMove: (direction: -1 | 1) => void;
   onDelete: () => void;
@@ -75,9 +128,32 @@ export function ItemEditor({
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
+  const [showAllFields, setShowAllFields] = useState(false);
+
+  const notesRef = useRef<HTMLTextAreaElement | null>(null);
+  useAutoGrow(notesRef, item.notes);
 
   const nudges = lintPrompt(item.prompt);
   const template = findTemplate(item.template, customTemplates);
+
+  /**
+   * Which boxes to draw.
+   *
+   * The folded ones open themselves whenever any of them holds something —
+   * data you typed must never sit invisible behind a fold, which would be a
+   * silent way to send a prompt missing half of what you wrote.
+   */
+  const hiddenFields = template ? template.fields.slice(VISIBLE_FIELDS) : [];
+  const hiddenHaveValues =
+    template !== null &&
+    hiddenFields.length > 0 &&
+    hasAnyFieldValue({ ...template, fields: hiddenFields }, item.fields);
+  const allFieldsShown = showAllFields || hiddenHaveValues;
+  const visibleFields = template
+    ? allFieldsShown
+      ? template.fields
+      : template.fields.slice(0, VISIBLE_FIELDS)
+    : [];
 
   /**
    * Any edit to a box recomposes the prompt.
@@ -104,16 +180,17 @@ export function ItemEditor({
   );
 
   /**
-   * Clicking the active template again clears it.
-   *
-   * Nothing is destroyed by switching: field values are kept under shared keys,
-   * so going Style → Bug carries `where` across, and the free-text box is never
-   * touched. That's why this no longer needs a "replace what you've written?"
-   * confirmation the way pasting a skeleton did.
+   * Nothing is destroyed by switching tag: field values are kept under shared
+   * keys, so going Style → Bug carries `where` across, and the free-text box is
+   * never touched. That's why this needs no "replace what you've written?"
+   * confirmation.
    */
   const pickTemplate = useCallback(
-    (next: Template) => applyEdit({ template: item.template === next.id ? null : next.id }),
-    [applyEdit, item.template]
+    (id: string) => {
+      setShowAllFields(false); // a new tag starts folded again
+      applyEdit({ template: id || null });
+    },
+    [applyEdit]
   );
 
   const cli = findAgentCli(improveCli);
@@ -160,73 +237,83 @@ export function ItemEditor({
 
   return (
     <div className="change-editor" style={{ borderTop: `1px solid ${theme.border}` }}>
-      <input
-        className="change-input"
-        style={{
-          background: theme.bgPrimary,
-          color: theme.textPrimary,
-          border: `1px solid ${theme.border}`,
-        }}
-        value={item.title}
-        placeholder="What needs changing?"
-        spellCheck={false}
-        onChange={(event) => onChange({ title: event.target.value })}
-      />
+      {/*
+       * The two properties of a change, on one row: how hard it is (which picks
+       * the model) and what kind it is (which picks the boxes). They used to be
+       * a button row plus a wrapping strip of seven chips — 114px between them
+       * at a narrow dock, for two small choices.
+       */}
+      <div className="change-props-row">
+        <div className="change-difficulty-row">
+          {DIFFICULTIES.map((difficulty) => {
+            const selected = item.difficulty === difficulty;
+            const color = difficultyColor(difficulty, theme);
+            return (
+              <button
+                key={difficulty}
+                className="change-radio"
+                style={{
+                  background: selected ? 'rgba(127, 127, 127, 0.14)' : 'transparent',
+                  border: `1px solid ${selected ? color : theme.border}`,
+                  color: selected ? color : theme.textSecondary,
+                  fontWeight: selected ? 600 : 400,
+                }}
+                title={`${DIFFICULTY_LABELS[difficulty]} — picks which model runs it`}
+                onClick={() => onChange({ difficulty })}
+              >
+                {DIFFICULTY_LABELS[difficulty]}
+              </button>
+            );
+          })}
+        </div>
 
-      {/* Difficulty — the setting that decides which model gets the job. Its own
-          class so all three stay on one line; the shared .change-radio-row
-          wraps, which orphaned "Hard" onto a second row. */}
-      <div className="change-difficulty-row">
-        {DIFFICULTIES.map((difficulty) => {
-          const selected = item.difficulty === difficulty;
-          const color = difficultyColor(difficulty, theme);
-          return (
-            <button
-              key={difficulty}
-              className="change-radio"
-              style={{
-                background: selected ? 'rgba(127, 127, 127, 0.14)' : 'transparent',
-                border: `1px solid ${selected ? color : theme.border}`,
-                color: selected ? color : theme.textSecondary,
-                fontWeight: selected ? 600 : 400,
-              }}
-              onClick={() => onChange({ difficulty })}
-            >
-              {DIFFICULTY_LABELS[difficulty]}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Pick one to get boxes; click it again to go back to free text. */}
-      <div className="change-templates">
-        {allTemplates(customTemplates).map((entry) => {
-          const active = item.template === entry.id;
-          return (
-            <button
-              key={entry.id}
-              className={`change-template-btn${active ? ' change-template-active' : ''}`}
-              style={{
-                border: `1px solid ${active ? theme.accent : theme.border}`,
-                color: active ? theme.accent : theme.textSecondary,
-              }}
-              title={active ? `Click to remove. ${entry.hint}` : entry.hint}
-              aria-pressed={active}
-              onClick={() => pickTemplate(entry)}
-            >
-              {entry.label}
-              {/* Reads as a removable pill, so it's obvious the active one can
-                  be clicked off rather than only swapped for another. */}
-              {active ? <span className="change-template-x">×</span> : null}
-            </button>
-          );
-        })}
+        {/*
+         * A native select, like the model pickers in Settings and for the same
+         * reason: the OS draws the list outside the panel, so every tag is
+         * readable even at a 260px dock, and it doesn't grow taller as you add
+         * tags of your own.
+         */}
+        <select
+          className="change-select change-tag-select"
+          style={{
+            background: theme.bgPrimary,
+            color: template ? theme.accent : theme.textSecondary,
+            border: `1px solid ${template ? theme.accent : theme.border}`,
+          }}
+          value={item.template ?? ''}
+          title={template ? template.hint : 'Pick a tag to get boxes to fill in'}
+          aria-label="Tag"
+          onChange={(event) => pickTemplate(event.target.value)}
+        >
+          <option value="">No tag</option>
+          <optgroup label="Tags">
+            {TEMPLATES.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.label}
+              </option>
+            ))}
+          </optgroup>
+          {customTemplates.length > 0 ? (
+            <optgroup label="Your tags">
+              {customTemplates.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.label}
+                </option>
+              ))}
+            </optgroup>
+          ) : null}
+        </select>
       </div>
 
       {/*
-       * The boxes sit in their own panel outlined in the same accent as the
-       * highlighted chip above, so it reads as "these belong to Style" rather
-       * than as five loose inputs that happen to follow it.
+       * The boxes sit in their own panel outlined in the accent, so they read as
+       * "these belong to Style" rather than as loose inputs that happen to
+       * follow the tag.
+       *
+       * Each box's label lives in its placeholder rather than in a caption above
+       * it — five captions cost 105px, a third of this panel. The label is still
+       * what composePrompt writes into the prompt, and aria-label/title keep it
+       * available once the box has text in it.
        */}
       {template ? (
         <div
@@ -235,55 +322,57 @@ export function ItemEditor({
           role="group"
           aria-label={`${template.label} template fields`}
         >
-          {template.fields.map((field) => (
-            <label className="change-field" key={field.id}>
-              <span className="change-field-name" style={{ color: theme.textMuted }}>
-                {field.label}
-              </span>
-              {field.multiline ? (
-                <textarea
-                  className="change-input change-field-box change-field-multiline"
-                  style={boxStyle}
-                  value={item.fields[field.id] ?? ''}
-                  placeholder={field.placeholder}
-                  spellCheck={false}
-                  onChange={(event) => setField(field.id, event.target.value)}
-                />
-              ) : (
-                <input
-                  className="change-input change-field-box"
-                  style={boxStyle}
-                  value={item.fields[field.id] ?? ''}
-                  placeholder={field.placeholder}
-                  spellCheck={false}
-                  onChange={(event) => setField(field.id, event.target.value)}
-                />
-              )}
-            </label>
-          ))}
+          {visibleFields.map((field) => {
+            const shared = {
+              style: boxStyle,
+              value: item.fields[field.id] ?? '',
+              placeholder: `${field.label} — ${field.placeholder}`,
+              'aria-label': field.label,
+              title: field.label,
+              spellCheck: false,
+              onChange: (event: { target: { value: string } }) =>
+                setField(field.id, event.target.value),
+            };
+            return field.multiline ? (
+              <textarea
+                key={field.id}
+                className="change-input change-field-box change-field-multiline"
+                {...shared}
+              />
+            ) : (
+              <input key={field.id} className="change-input change-field-box" {...shared} />
+            );
+          })}
+
+          {/* Hidden while any folded box holds something — see hiddenHaveValues. */}
+          {hiddenFields.length > 0 && !hiddenHaveValues ? (
+            <button
+              className="change-fold change-fields-fold"
+              style={{ color: theme.textMuted }}
+              aria-expanded={showAllFields}
+              onClick={() => setShowAllFields(!showAllFields)}
+            >
+              {showAllFields ? '▾ Fewer' : `▸ ${hiddenFields.length} more`}
+            </button>
+          ) : null}
         </div>
       ) : null}
 
-      {/* Free text: the whole prompt with no template, an extra note with one. */}
-      <label className="change-field">
-        {template ? (
-          <span className="change-field-name" style={{ color: theme.textMuted }}>
-            Anything else
-          </span>
-        ) : null}
-        <textarea
-          className="change-textarea"
-          style={boxStyle}
-          value={item.notes}
-          placeholder={
-            template
-              ? 'Optional — anything the boxes above don’t cover'
-              : "The instruction you'll hand to your agent. Or pick a template above to fill in boxes instead."
-          }
-          spellCheck={false}
-          onChange={(event) => applyEdit({ notes: event.target.value })}
-        />
-      </label>
+      {/* Free text: the whole prompt with no tag, an extra note with one. */}
+      <textarea
+        ref={notesRef}
+        className="change-textarea"
+        style={boxStyle}
+        value={item.notes}
+        aria-label={template ? 'Anything else' : 'Prompt'}
+        placeholder={
+          template
+            ? 'Anything else the boxes don’t cover'
+            : "The instruction you'll hand to your agent. Or pick a tag to fill in boxes instead."
+        }
+        spellCheck={false}
+        onChange={(event) => applyEdit({ notes: event.target.value })}
+      />
 
       {/*
        * The assembled prompt, read-only.
@@ -377,6 +466,21 @@ export function ItemEditor({
           </div>
         </div>
       ) : null}
+
+      {/*
+       * The send section — where "I've written this" turns into "send it".
+       * Last, because it's the most consequential thing here: it's the only
+       * part of the editor that can run git and touch the clipboard.
+       */}
+      <SendPanel
+        item={item}
+        settings={sending.settings}
+        branchPrefix={sending.branchPrefix}
+        hasUncommittedChanges={sending.hasUncommittedChanges}
+        busy={sending.busy}
+        onSend={sending.onSend}
+      />
+
 
       {/* Footer: the rarely-used controls, kept out of the collapsed row. */}
       <div className="change-editor-actions">

@@ -56,10 +56,10 @@ export const TEMPLATES: Template[] = [
     hint: 'How something already on the page looks — colour, size, spacing, weight.',
     fields: [
       { id: 'what', label: 'What', placeholder: 'the hero headline' },
-      { id: 'where', label: 'Where', placeholder: 'home page, or src/components/Hero.tsx' },
-      { id: 'should', label: 'Should be', placeholder: 'the size, spacing or colour you want' },
+      { id: 'where', label: 'Where', placeholder: 'home page, or the file' },
+      { id: 'should', label: 'Should be', placeholder: 'size, spacing, colour' },
       // The single most common web-specific detail an agent otherwise guesses.
-      { id: 'screen', label: 'Screen size', placeholder: 'only on mobile, only above 1024px…' },
+      { id: 'screen', label: 'Screen size', placeholder: 'only on mobile?' },
       { id: 'keep', label: 'Keep', placeholder: "what mustn't change" },
     ],
   },
@@ -68,11 +68,11 @@ export const TEMPLATES: Template[] = [
     label: 'Text',
     hint: 'Wording — headlines, body text, button labels.',
     fields: [
-      { id: 'what', label: 'What', placeholder: 'the headline, a button label' },
-      { id: 'where', label: 'Where', placeholder: 'home page, hero section' },
+      { id: 'what', label: 'What', placeholder: 'a headline or button' },
+      { id: 'where', label: 'Where', placeholder: 'home page, hero' },
       // Pasting the exact string is what lets an agent find it without guessing.
       { id: 'current', label: 'Current text', placeholder: 'paste it here', multiline: true },
-      { id: 'should', label: 'Should say', placeholder: 'the message, and the tone' },
+      { id: 'should', label: 'Should say', placeholder: 'the message and tone' },
     ],
   },
   {
@@ -83,8 +83,8 @@ export const TEMPLATES: Template[] = [
       { id: 'what', label: 'What', placeholder: 'the gallery section' },
       { id: 'where', label: 'Where', placeholder: 'home page' },
       // The relationship is the whole point of a layout change.
-      { id: 'destination', label: 'Should end up', placeholder: 'above the testimonials, or removed' },
-      { id: 'keep', label: 'Keep', placeholder: "what mustn't move or change" },
+      { id: 'destination', label: 'Should end up', placeholder: 'above testimonials' },
+      { id: 'keep', label: 'Keep', placeholder: "what mustn't move" },
     ],
   },
   {
@@ -93,10 +93,10 @@ export const TEMPLATES: Template[] = [
     hint: "Something that isn't there yet — a button, a section, a page.",
     fields: [
       { id: 'what', label: 'What to add', placeholder: 'a Send email button' },
-      { id: 'where', label: 'Where', placeholder: 'the nav bar, or below the hero' },
-      { id: 'content', label: 'Content', placeholder: 'its label, text, images, links', multiline: true },
-      { id: 'does', label: 'What it does', placeholder: 'opens the mail app, links to /contact' },
-      { id: 'match', label: 'Match', placeholder: 'the existing thing it should look like' },
+      { id: 'where', label: 'Where', placeholder: 'the nav bar' },
+      { id: 'content', label: 'Content', placeholder: 'its label, text, links', multiline: true },
+      { id: 'does', label: 'What it does', placeholder: 'opens the mail app' },
+      { id: 'match', label: 'Match', placeholder: 'what it should look like' },
     ],
   },
   {
@@ -105,8 +105,8 @@ export const TEMPLATES: Template[] = [
     hint: 'How something responds — clicks, hovers, forms, links, animation.',
     fields: [
       { id: 'what', label: 'What', placeholder: 'the mobile menu' },
-      { id: 'where', label: 'Where', placeholder: 'the header, on every page' },
-      { id: 'does', label: 'Should do', placeholder: 'close when you click outside it' },
+      { id: 'where', label: 'Where', placeholder: 'the header, everywhere' },
+      { id: 'does', label: 'Should do', placeholder: 'close on outside click' },
       { id: 'keep', label: 'Keep working', placeholder: "what mustn't break" },
     ],
   },
@@ -122,11 +122,11 @@ export const TEMPLATES: Template[] = [
        * nonsense. `where` genuinely does mean the same thing everywhere, so it
        * stays shared and carries across a tag switch.
        */
-      { id: 'symptom', label: 'What goes wrong', placeholder: 'the form submits twice' },
+      { id: 'symptom', label: 'What goes wrong', placeholder: 'it submits twice' },
       { id: 'where', label: 'Where', placeholder: 'contact page, or the file' },
-      { id: 'steps', label: 'Steps', placeholder: 'what you do to see it happen', multiline: true },
-      { id: 'expected', label: 'Expected', placeholder: 'what should happen instead' },
-      { id: 'screen', label: 'Only on', placeholder: 'a browser or screen size, if not everywhere' },
+      { id: 'steps', label: 'Steps', placeholder: 'how to see it happen', multiline: true },
+      { id: 'expected', label: 'Expected', placeholder: 'what should happen' },
+      { id: 'screen', label: 'Only on', placeholder: 'a browser or screen size' },
     ],
   },
 ];

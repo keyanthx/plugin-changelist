@@ -12,7 +12,6 @@ import {
   createItem,
   groupItems,
   moveItem,
-  nextDifficulty,
   readStored,
   removeItem,
   setStatus,
@@ -263,12 +262,6 @@ test('removing takes exactly one item out', () => {
     removeItem([item('a'), item('b')], 'a').map((entry) => entry.id),
     ['b']
   );
-});
-
-test('difficulty cycles all the way round', () => {
-  assert.equal(nextDifficulty('easy'), 'normal');
-  assert.equal(nextDifficulty('normal'), 'hard');
-  assert.equal(nextDifficulty('hard'), 'easy');
 });
 
 test('a new item records the branch it was written on', () => {

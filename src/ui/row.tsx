@@ -27,44 +27,14 @@ export function difficultyColor(difficulty: Difficulty, theme: ReturnType<typeof
   return theme.accent;
 }
 
-export function DifficultyChip({
-  difficulty,
-  onCycle,
-}: {
-  difficulty: Difficulty;
-  onCycle?: () => void;
-}) {
-  const theme = useTheme();
-  return (
-    <button
-      className="change-chip"
-      style={{
-        color: difficultyColor(difficulty, theme),
-        background: 'rgba(127, 127, 127, 0.14)',
-        cursor: onCycle ? 'pointer' : 'default',
-      }}
-      title={
-        onCycle
-          ? `${DIFFICULTY_LABELS[difficulty]} — click to change. This picks which model runs it.`
-          : DIFFICULTY_LABELS[difficulty]
-      }
-      onClick={onCycle}
-      disabled={!onCycle}
-    >
-      {DIFFICULTY_LABELS[difficulty].charAt(0)}
-    </button>
-  );
-}
-
 export function ItemRow({
   item,
   expanded,
   currentBranch,
   onToggleExpand,
   onToggleDone,
-  onCycleDifficulty,
+  onTitleChange,
   onSend,
-  onOptions,
 }: {
   item: ChangeItem;
   expanded: boolean;
@@ -72,9 +42,9 @@ export function ItemRow({
   currentBranch: string | null;
   onToggleExpand: () => void;
   onToggleDone: () => void;
-  onCycleDifficulty: () => void;
+  /** Editing happens here while expanded — the editor has no title box. */
+  onTitleChange: (title: string) => void;
   onSend: () => void;
-  onOptions: () => void;
 }) {
   const theme = useTheme();
   const isDone = item.status === 'done';
@@ -111,43 +81,76 @@ export function ItemRow({
         onClick={onToggleDone}
       />
 
-      {/*
-       * The whole middle of the row is one button, including the slack after
-       * the title — with the title sized to its text the target was only as
-       * wide as the words, so short titles were fiddly to hit. The chevron is
-       * the hint that there's something to open.
-       */}
-      <button
-        className="change-row-open"
-        style={{ color: theme.textPrimary }}
-        title={expanded ? 'Collapse' : 'Open'}
-        aria-expanded={expanded}
-        onClick={onToggleExpand}
-      >
-        <span className={`change-row-title${isDone ? ' change-done' : ''}`}>
-          {item.title || <span style={{ color: theme.textMuted }}>Untitled change</span>}
-        </span>
-
-        {missingPrompt && !isDone ? (
-          <span
-            className="change-no-prompt"
+      {expanded ? (
+        /*
+         * Open: the row's title becomes the title box. The editor below used to
+         * carry its own input holding the same text, directly under this row —
+         * two fields for one value, and 41px of height for the duplicate.
+         *
+         * The cost is that the row is no longer one big click target while it's
+         * open, because clicking the title now puts a cursor in it. The chevron
+         * beside it takes over as the collapse control.
+         */
+        <>
+          <input
+            className="change-row-title-input"
+            style={{ color: theme.textPrimary }}
+            value={item.title}
+            placeholder="What needs changing?"
+            aria-label="Title"
+            spellCheck={false}
+            onChange={(event) => onTitleChange(event.target.value)}
+          />
+          <button
+            className="change-row-collapse"
             style={{ color: theme.textMuted }}
-            title="No prompt yet — sending would hand over just the title"
-            aria-label="No prompt yet"
+            title="Collapse"
+            aria-label="Collapse"
+            aria-expanded
+            onClick={onToggleExpand}
           >
-            {/* A hollow speech mark: quiet, and legible at 11px. */}
-            &#8230;
+            ▾
+          </button>
+        </>
+      ) : (
+        /*
+         * Closed: the whole middle of the row is one button, including the slack
+         * after the title — with the title sized to its text the target was only
+         * as wide as the words, so short titles were fiddly to hit. The chevron
+         * is the hint that there's something to open.
+         */
+        <button
+          className="change-row-open"
+          style={{ color: theme.textPrimary }}
+          title="Open"
+          aria-expanded={false}
+          onClick={onToggleExpand}
+        >
+          <span className={`change-row-title${isDone ? ' change-done' : ''}`}>
+            {item.title || <span style={{ color: theme.textMuted }}>Untitled change</span>}
           </span>
-        ) : null}
 
-        <span className="change-row-chevron" style={{ color: theme.textMuted }} aria-hidden="true">
-          {expanded ? '▾' : '▸'}
-        </span>
+          {missingPrompt && !isDone ? (
+            <span
+              className="change-no-prompt"
+              style={{ color: theme.textMuted }}
+              title="No prompt yet — sending would hand over just the title"
+              aria-label="No prompt yet"
+            >
+              {/* A hollow speech mark: quiet, and legible at 11px. */}
+              &#8230;
+            </span>
+          ) : null}
 
-        {/* Takes the slack — inside the button, so the empty space is clickable
-            too rather than being dead area in the middle of the row. */}
-        <span className="change-row-spacer" />
-      </button>
+          <span className="change-row-chevron" style={{ color: theme.textMuted }} aria-hidden="true">
+            ▸
+          </span>
+
+          {/* Takes the slack — inside the button, so the empty space is clickable
+              too rather than being dead area in the middle of the row. */}
+          <span className="change-row-spacer" />
+        </button>
+      )}
 
       {showBranch ? (
         /*
@@ -174,13 +177,15 @@ export function ItemRow({
 
       {!isDone ? (
         /* Revealed on hover and keyboard focus — see .change-row-actions. Kept
-           in the DOM (opacity, not display) so they stay tabbable. */
+           in the DOM (opacity, not display) so it stays tabbable.
+
+           Just the one button now: the send options used to sit behind a ⌄
+           beside it, but they live in the expanded editor and are always
+           visible there, so a second control that only revealed them was one
+           button too many on a row this narrow. */
         <span className="change-row-actions">
           <IconButton label="Send to the terminal" onClick={onSend}>
             <span style={{ color: theme.accent, fontSize: 12 }}>▶</span>
-          </IconButton>
-          <IconButton label="Send options" onClick={onOptions}>
-            ⌄
           </IconButton>
         </span>
       ) : null}

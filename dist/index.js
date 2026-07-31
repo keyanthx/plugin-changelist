@@ -398,10 +398,6 @@ const DIFFICULTY_LABELS = {
   normal: "Normal",
   hard: "Hard"
 };
-function nextDifficulty(current) {
-  const index = DIFFICULTIES$2.indexOf(current);
-  return DIFFICULTIES$2[(index + 1) % DIFFICULTIES$2.length];
-}
 const STORAGE_KEY$1 = "shipstudio-changelist-dock";
 const MIN_DOCK_WIDTH = 260;
 const MAX_DOCK_WIDTH = 720;
@@ -575,7 +571,7 @@ function viewport() {
   return { width: window.innerWidth, height: window.innerHeight };
 }
 function isOurs(element) {
-  return Boolean(element.closest(".change-frame, .change-overlay"));
+  return Boolean(element.closest(".change-frame"));
 }
 function measureHeaderBottom() {
   const view = viewport();
@@ -788,13 +784,12 @@ const CSS = `
  */
 @media (prefers-reduced-motion: reduce) {
   .change-frame,
-  .change-modal,
+  .change-send-strip,
   .change-row,
   .change-row-sent,
   .change-row-actions,
   .change-row-open,
   .change-row-chevron,
-  .change-template-x,
   .change-dot,
   .change-resize-handle {
     animation: none !important;
@@ -807,8 +802,9 @@ const CSS = `
 
 /*
  * The panel never dims the app behind it, in either state — the whole point of
- * pinning a change list is to keep working while it's visible. z-index sits
- * below the send/settings modals so those still layer on top.
+ * pinning a change list is to keep working while it's visible. Nothing in this
+ * plugin overlays any more: settings swap into the same frame, and send options
+ * open inline on their row.
  */
 .change-frame {
   position: fixed;
@@ -903,8 +899,7 @@ const CSS = `
  * (Note for future edits: this file is one big template literal — backticks in
  * these comments would end the string.)
  */
-.change-frame > .change-frame-body,
-.change-overlay .change-modal-body {
+.change-frame > .change-frame-body {
   overflow-y: auto !important;
   /*
    * auto, not hidden. Hidden made anything past the right edge unreachable
@@ -941,69 +936,29 @@ const CSS = `
 .change-frame .change-button-row,
 .change-frame .change-tag-head,
 .change-frame .change-tag-box-row,
-.change-frame .change-templates {
+.change-frame .change-send-modes,
+.change-frame .change-send-command,
+.change-frame .change-props-row {
   display: flex !important;
   flex-direction: row !important;
 }
 
 .change-frame .change-settings,
 .change-frame .change-fields,
-.change-frame .change-field,
 .change-frame .change-tag-list,
 .change-frame .change-tag-card,
 .change-frame .change-tag-boxes,
 .change-frame .change-editor,
+.change-frame .change-send-strip,
 .change-frame .change-popover-body,
 .change-frame .change-settings-grid {
   display: flex !important;
   flex-direction: column !important;
 }
 
-/* ---------------------------------------------------------------- modal */
-
-/* Still used for the transient dialogs — send options and settings. Those DO
-   dim, because they want an answer before you carry on. */
-.change-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(2px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-}
-
-.change-modal {
-  width: min(760px, 94vw);
-  max-height: 88vh;
-  display: flex;
-  flex-direction: column;
-  border-radius: 10px;
-  overflow: hidden;
-  animation: changeFadeIn 0.12s ease-out;
-}
-
-.change-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  font-size: 13px;
-  font-weight: 600;
-  flex: none;
-}
+/* --------------------------------------------------------- panel header */
 
 .change-header-actions { display: flex; align-items: center; gap: 4px; }
-
-.change-modal-body {
-  padding: 14px 16px 18px;
-  font-size: 13px;
-  line-height: 1.5;
-  overscroll-behavior: contain;
-  /* Its overflow-y is set by the defended rule above, alongside the panel's. */
-}
 
 .change-close {
   background: none;
@@ -1032,8 +987,12 @@ const CSS = `
 }
 
 .change-textarea {
-  min-height: 108px;
-  resize: vertical;
+  /* Starts small and grows to fit — see useAutoGrow in editor.tsx. It used to
+     reserve 108px whether or not anything was written in it. resize is off
+     because a dragged height would be overwritten on the next keystroke. */
+  min-height: 56px;
+  resize: none;
+  overflow-y: hidden;
   line-height: 1.55;
 }
 
@@ -1053,6 +1012,18 @@ const CSS = `
   white-space: nowrap;
 }
 .change-btn:disabled { opacity: 0.5; cursor: default; }
+
+/*
+ * Button labels take the button's colour, whatever the host says.
+ *
+ * Our buttons set their text colour inline on the <button>, but the label is
+ * wrapped in a <span> so the flex gap between icon and text applies. A host rule
+ * as ordinary as ".toolbar span { color: var(--text-muted) }" then targets that
+ * span directly and beats the inherited colour — which renders "Copy and focus
+ * terminal" in grey on a solid blue button, i.e. unreadable. Two classes plus an
+ * element out-specifies that shape of rule without needing !important.
+ */
+.change-frame .change-btn > span { color: inherit; }
 
 .change-icon-btn {
   background: none;
@@ -1191,6 +1162,42 @@ const CSS = `
 
 .change-row-spacer { flex: 1 1 0; min-width: 0; }
 
+/*
+ * The title box, shown in place of the open button while a change is expanded.
+ *
+ * Deliberately borderless and transparent until focused, so an open row still
+ * reads as a heading rather than sprouting a form field where the title was.
+ */
+.change-row-title-input {
+  flex: 1 1 0;
+  min-width: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 5px;
+  outline: none;
+}
+.change-row-title-input:hover { border-color: rgba(127, 127, 127, 0.3); }
+.change-row-title-input:focus { border-color: rgba(127, 127, 127, 0.55); }
+
+/* Takes over as the collapse control once the title is editable. Sized like the
+   row's other icon buttons so it stays an easy target. */
+.change-row-collapse {
+  flex: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 6px 7px;
+  border-radius: 5px;
+  opacity: 0.75;
+}
+.change-row-collapse:hover { background: rgba(127, 127, 127, 0.16); opacity: 1; }
+
 /* "No prompt yet" — quiet, but present, because sending without one hands the
    agent nothing but the title. */
 .change-no-prompt {
@@ -1237,19 +1244,6 @@ const CSS = `
 
 .change-row-sent { animation: changeRowSent 0.7s ease-out; }
 
-.change-chip {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 2px 5px;
-  border-radius: 4px;
-  border: none;
-  cursor: pointer;
-  font-family: inherit;
-  flex: none;
-  line-height: 1.4;
-}
-
 /* The branch signal: an icon costing ~11px, with the name in its tooltip. As
    text this was 92px of a 248px row and left the title truncated. */
 .change-branch-mark {
@@ -1268,33 +1262,13 @@ const CSS = `
 
 /* --------------------------------------------------------------- editor */
 
-.change-editor { padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 11px; }
+.change-editor { padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 
-.change-templates { display: flex; flex-wrap: wrap; gap: 5px; }
-
-.change-template-btn {
-  font-size: 11px;
-  padding: 4px 9px;
-  border-radius: 999px;
-  cursor: pointer;
-  font-family: inherit;
-  background: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-/* The active chip carries a ×, so it reads as a removable pill and it's clear
-   it can be clicked off rather than only swapped for another. */
-.change-template-active { background: rgba(127, 127, 127, 0.12); }
-
-.change-template-x {
-  font-size: 13px;
-  line-height: 1;
-  opacity: 0.55;
-  transition: opacity 0.12s ease-out;
-}
-.change-template-active:hover .change-template-x { opacity: 1; }
+/* Difficulty and tag on one line. Wraps at a narrow dock rather than squeezing
+   the three difficulty buttons into something unreadable. */
+.change-props-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.change-props-row .change-difficulty-row { flex: 1 1 145px; }
+.change-tag-select { flex: 1 1 96px; }
 
 /*
  * The template's boxes, in a panel of their own.
@@ -1308,26 +1282,22 @@ const CSS = `
 .change-fields {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
   min-width: 0;
-  padding: 10px;
+  padding: 8px;
   border: 1px solid;
   border-radius: 8px;
   background: rgba(127, 127, 127, 0.05);
 }
 
-.change-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+/* Each box carries its own label in its placeholder, so there is no caption
+   above it. Five captions cost 105px — a third of this panel — for text that
+   repeats what the placeholder already says. */
+.change-field-box { padding: 4px 8px; }
+.change-field-multiline { min-height: 46px; resize: vertical; line-height: 1.5; }
 
-.change-field-name {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-}
-
-/* Shorter than the free-text box: these hold a phrase, not a paragraph. */
-.change-field-box { padding: 6px 8px; }
-.change-field-multiline { min-height: 52px; resize: vertical; line-height: 1.5; }
+/* "2 more" — sits inside the panel so it reads as part of the tag's form. */
+.change-fields-fold { margin-bottom: 0; align-self: flex-start; }
 
 .change-nudges { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; }
 .change-nudge { display: inline-flex; align-items: center; gap: 4px; }
@@ -1390,6 +1360,72 @@ const CSS = `
 
 .change-popover-body { display: flex; flex-direction: column; gap: 13px; }
 
+/*
+ * The send options, inside the expanded change.
+ *
+ * Same recipe as .change-fields — a thin accent outline over a faint neutral
+ * tint — so it reads as one labelled region of the editor rather than loose
+ * controls at the bottom of it. No margin: it's a flex child of .change-editor
+ * like every other block there, and lines up with the title box above it.
+ */
+.change-send-strip {
+  padding: 9px;
+  border: 1px solid;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  animation: changeRowIn 0.14s ease-out;
+}
+
+/*
+ * Two destinations, side by side — the same trick as .change-difficulty-row.
+ *
+ * A fixed flex-basis wraps them onto two lines the moment the dock gets narrow:
+ * at 260px there are 192px to share, and two 96px buttons plus a 6px gap is
+ * already 198. Basis 0 lets them split whatever width there actually is.
+ */
+.change-send-modes { display: flex; gap: 6px; min-width: 0; flex-wrap: nowrap; }
+.change-send-modes .change-radio {
+  flex: 1 1 0;
+  min-width: 0;
+  /* Tight horizontally so "Running agent" still fits whole at 260px. */
+  padding: 5px 6px;
+  text-align: center;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The command as one truncated line, the whole thing a click away. */
+.change-send-command {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.change-send-caret { flex: none; font-size: 9px; }
+.change-send-command-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.change-send-note { font-size: 11px; line-height: 1.5; margin-top: 6px; overflow-wrap: anywhere; }
+
 .change-code {
   border-radius: 6px;
   padding: 9px 10px;
@@ -1421,6 +1457,8 @@ const CSS = `
 .change-difficulty-row .change-radio {
   flex: 1 1 0;
   min-width: 0;
+  /* Tighter than a standalone radio — these sit on a shared row now. */
+  padding: 5px 8px;
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1730,10 +1768,10 @@ const TEMPLATES = [
     hint: "How something already on the page looks — colour, size, spacing, weight.",
     fields: [
       { id: "what", label: "What", placeholder: "the hero headline" },
-      { id: "where", label: "Where", placeholder: "home page, or src/components/Hero.tsx" },
-      { id: "should", label: "Should be", placeholder: "the size, spacing or colour you want" },
+      { id: "where", label: "Where", placeholder: "home page, or the file" },
+      { id: "should", label: "Should be", placeholder: "size, spacing, colour" },
       // The single most common web-specific detail an agent otherwise guesses.
-      { id: "screen", label: "Screen size", placeholder: "only on mobile, only above 1024px…" },
+      { id: "screen", label: "Screen size", placeholder: "only on mobile?" },
       { id: "keep", label: "Keep", placeholder: "what mustn't change" }
     ]
   },
@@ -1742,11 +1780,11 @@ const TEMPLATES = [
     label: "Text",
     hint: "Wording — headlines, body text, button labels.",
     fields: [
-      { id: "what", label: "What", placeholder: "the headline, a button label" },
-      { id: "where", label: "Where", placeholder: "home page, hero section" },
+      { id: "what", label: "What", placeholder: "a headline or button" },
+      { id: "where", label: "Where", placeholder: "home page, hero" },
       // Pasting the exact string is what lets an agent find it without guessing.
       { id: "current", label: "Current text", placeholder: "paste it here", multiline: true },
-      { id: "should", label: "Should say", placeholder: "the message, and the tone" }
+      { id: "should", label: "Should say", placeholder: "the message and tone" }
     ]
   },
   {
@@ -1757,8 +1795,8 @@ const TEMPLATES = [
       { id: "what", label: "What", placeholder: "the gallery section" },
       { id: "where", label: "Where", placeholder: "home page" },
       // The relationship is the whole point of a layout change.
-      { id: "destination", label: "Should end up", placeholder: "above the testimonials, or removed" },
-      { id: "keep", label: "Keep", placeholder: "what mustn't move or change" }
+      { id: "destination", label: "Should end up", placeholder: "above testimonials" },
+      { id: "keep", label: "Keep", placeholder: "what mustn't move" }
     ]
   },
   {
@@ -1767,10 +1805,10 @@ const TEMPLATES = [
     hint: "Something that isn't there yet — a button, a section, a page.",
     fields: [
       { id: "what", label: "What to add", placeholder: "a Send email button" },
-      { id: "where", label: "Where", placeholder: "the nav bar, or below the hero" },
-      { id: "content", label: "Content", placeholder: "its label, text, images, links", multiline: true },
-      { id: "does", label: "What it does", placeholder: "opens the mail app, links to /contact" },
-      { id: "match", label: "Match", placeholder: "the existing thing it should look like" }
+      { id: "where", label: "Where", placeholder: "the nav bar" },
+      { id: "content", label: "Content", placeholder: "its label, text, links", multiline: true },
+      { id: "does", label: "What it does", placeholder: "opens the mail app" },
+      { id: "match", label: "Match", placeholder: "what it should look like" }
     ]
   },
   {
@@ -1779,8 +1817,8 @@ const TEMPLATES = [
     hint: "How something responds — clicks, hovers, forms, links, animation.",
     fields: [
       { id: "what", label: "What", placeholder: "the mobile menu" },
-      { id: "where", label: "Where", placeholder: "the header, on every page" },
-      { id: "does", label: "Should do", placeholder: "close when you click outside it" },
+      { id: "where", label: "Where", placeholder: "the header, everywhere" },
+      { id: "does", label: "Should do", placeholder: "close on outside click" },
       { id: "keep", label: "Keep working", placeholder: "what mustn't break" }
     ]
   },
@@ -1796,20 +1834,17 @@ const TEMPLATES = [
        * nonsense. `where` genuinely does mean the same thing everywhere, so it
        * stays shared and carries across a tag switch.
        */
-      { id: "symptom", label: "What goes wrong", placeholder: "the form submits twice" },
+      { id: "symptom", label: "What goes wrong", placeholder: "it submits twice" },
       { id: "where", label: "Where", placeholder: "contact page, or the file" },
-      { id: "steps", label: "Steps", placeholder: "what you do to see it happen", multiline: true },
-      { id: "expected", label: "Expected", placeholder: "what should happen instead" },
-      { id: "screen", label: "Only on", placeholder: "a browser or screen size, if not everywhere" }
+      { id: "steps", label: "Steps", placeholder: "how to see it happen", multiline: true },
+      { id: "expected", label: "Expected", placeholder: "what should happen" },
+      { id: "screen", label: "Only on", placeholder: "a browser or screen size" }
     ]
   }
 ];
 function findTemplate(id, custom = []) {
   if (!id) return null;
   return TEMPLATES.find((template) => template.id === id) ?? custom.find((template) => template.id === id) ?? null;
-}
-function allTemplates(custom = []) {
-  return [...TEMPLATES, ...custom];
 }
 function composePrompt(template, fields, notes) {
   const lines = [];
@@ -1828,45 +1863,11 @@ ${value}` : `${field.label}: ${value}`);
 
 ${trailing}`;
 }
-const ShipReact$5 = window.__SHIPSTUDIO_REACT__;
-function Modal({
-  title,
-  onClose,
-  headerExtra,
-  children
-}) {
-  const theme = useTheme();
-  useEffect(() => {
-    const onKey = (event) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  return /* @__PURE__ */ ShipReact$5.createElement("div", { className: "change-overlay", onClick: onClose }, /* @__PURE__ */ ShipReact$5.createElement(
-    "div",
-    {
-      className: "change-modal",
-      style: {
-        background: theme.bgPrimary,
-        color: theme.textPrimary,
-        border: `1px solid ${theme.border}`
-      },
-      onClick: (event) => event.stopPropagation()
-    },
-    /* @__PURE__ */ ShipReact$5.createElement("div", { className: "change-modal-header", style: { borderBottom: `1px solid ${theme.border}` } }, /* @__PURE__ */ ShipReact$5.createElement("span", null, title), /* @__PURE__ */ ShipReact$5.createElement("span", { className: "change-header-actions" }, headerExtra, /* @__PURE__ */ ShipReact$5.createElement(
-      "button",
-      {
-        className: "change-close",
-        style: { color: theme.textMuted },
-        title: "Close",
-        onClick: onClose
-      },
-      "✕"
-    ))),
-    /* @__PURE__ */ ShipReact$5.createElement("div", { className: "change-modal-body" }, children)
-  ));
+function hasAnyFieldValue(template, fields) {
+  if (!template) return false;
+  return template.fields.some((field) => (fields[field.id] ?? "").trim().length > 0);
 }
+const ShipReact$5 = window.__SHIPSTUDIO_REACT__;
 function PanelFrame({
   title,
   onClose,
@@ -2086,9 +2087,8 @@ function ItemRow({
   currentBranch,
   onToggleExpand,
   onToggleDone,
-  onCycleDifficulty,
-  onSend,
-  onOptions
+  onTitleChange,
+  onSend
 }) {
   const theme = useTheme();
   const isDone = item.status === "done";
@@ -2107,28 +2107,69 @@ function ItemRow({
       "aria-label": isDone ? "Mark as not done" : "Mark as done",
       onClick: onToggleDone
     }
-  ), /* @__PURE__ */ ShipReact$4.createElement(
-    "button",
-    {
-      className: "change-row-open",
-      style: { color: theme.textPrimary },
-      title: expanded ? "Collapse" : "Open",
-      "aria-expanded": expanded,
-      onClick: onToggleExpand
-    },
-    /* @__PURE__ */ ShipReact$4.createElement("span", { className: `change-row-title${isDone ? " change-done" : ""}` }, item.title || /* @__PURE__ */ ShipReact$4.createElement("span", { style: { color: theme.textMuted } }, "Untitled change")),
-    missingPrompt && !isDone ? /* @__PURE__ */ ShipReact$4.createElement(
-      "span",
+  ), expanded ? (
+    /*
+     * Open: the row's title becomes the title box. The editor below used to
+     * carry its own input holding the same text, directly under this row —
+     * two fields for one value, and 41px of height for the duplicate.
+     *
+     * The cost is that the row is no longer one big click target while it's
+     * open, because clicking the title now puts a cursor in it. The chevron
+     * beside it takes over as the collapse control.
+     */
+    /* @__PURE__ */ ShipReact$4.createElement(ShipReact$4.Fragment, null, /* @__PURE__ */ ShipReact$4.createElement(
+      "input",
       {
-        className: "change-no-prompt",
+        className: "change-row-title-input",
+        style: { color: theme.textPrimary },
+        value: item.title,
+        placeholder: "What needs changing?",
+        "aria-label": "Title",
+        spellCheck: false,
+        onChange: (event) => onTitleChange(event.target.value)
+      }
+    ), /* @__PURE__ */ ShipReact$4.createElement(
+      "button",
+      {
+        className: "change-row-collapse",
         style: { color: theme.textMuted },
-        title: "No prompt yet — sending would hand over just the title",
-        "aria-label": "No prompt yet"
+        title: "Collapse",
+        "aria-label": "Collapse",
+        "aria-expanded": true,
+        onClick: onToggleExpand
       },
-      "…"
-    ) : null,
-    /* @__PURE__ */ ShipReact$4.createElement("span", { className: "change-row-chevron", style: { color: theme.textMuted }, "aria-hidden": "true" }, expanded ? "▾" : "▸"),
-    /* @__PURE__ */ ShipReact$4.createElement("span", { className: "change-row-spacer" })
+      "▾"
+    ))
+  ) : (
+    /*
+     * Closed: the whole middle of the row is one button, including the slack
+     * after the title — with the title sized to its text the target was only
+     * as wide as the words, so short titles were fiddly to hit. The chevron
+     * is the hint that there's something to open.
+     */
+    /* @__PURE__ */ ShipReact$4.createElement(
+      "button",
+      {
+        className: "change-row-open",
+        style: { color: theme.textPrimary },
+        title: "Open",
+        "aria-expanded": false,
+        onClick: onToggleExpand
+      },
+      /* @__PURE__ */ ShipReact$4.createElement("span", { className: `change-row-title${isDone ? " change-done" : ""}` }, item.title || /* @__PURE__ */ ShipReact$4.createElement("span", { style: { color: theme.textMuted } }, "Untitled change")),
+      missingPrompt && !isDone ? /* @__PURE__ */ ShipReact$4.createElement(
+        "span",
+        {
+          className: "change-no-prompt",
+          style: { color: theme.textMuted },
+          title: "No prompt yet — sending would hand over just the title",
+          "aria-label": "No prompt yet"
+        },
+        "…"
+      ) : null,
+      /* @__PURE__ */ ShipReact$4.createElement("span", { className: "change-row-chevron", style: { color: theme.textMuted }, "aria-hidden": "true" }, "▸"),
+      /* @__PURE__ */ ShipReact$4.createElement("span", { className: "change-row-spacer" })
+    )
   ), showBranch ? (
     /*
      * An icon, not the name. The tag's real job is the binary signal "this
@@ -2149,12 +2190,195 @@ function ItemRow({
     )
   ) : null, !isDone ? (
     /* Revealed on hover and keyboard focus — see .change-row-actions. Kept
-       in the DOM (opacity, not display) so they stay tabbable. */
-    /* @__PURE__ */ ShipReact$4.createElement("span", { className: "change-row-actions" }, /* @__PURE__ */ ShipReact$4.createElement(IconButton, { label: "Send to the terminal", onClick: onSend }, /* @__PURE__ */ ShipReact$4.createElement("span", { style: { color: theme.accent, fontSize: 12 } }, "▶")), /* @__PURE__ */ ShipReact$4.createElement(IconButton, { label: "Send options", onClick: onOptions }, "⌄"))
+               in the DOM (opacity, not display) so it stays tabbable.
+    
+               Just the one button now: the send options used to sit behind a ⌄
+               beside it, but they live in the expanded editor and are always
+               visible there, so a second control that only revealed them was one
+               button too many on a row this narrow. */
+    /* @__PURE__ */ ShipReact$4.createElement("span", { className: "change-row-actions" }, /* @__PURE__ */ ShipReact$4.createElement(IconButton, { label: "Send to the terminal", onClick: onSend }, /* @__PURE__ */ ShipReact$4.createElement("span", { style: { color: theme.accent, fontSize: 12 } }, "▶")))
   ) : null);
 }
 const ShipReact$3 = window.__SHIPSTUDIO_REACT__;
+function SendPanel({
+  item,
+  settings,
+  branchPrefix,
+  hasUncommittedChanges,
+  busy,
+  onSend
+}) {
+  const theme = useTheme();
+  const [mode, setMode] = useState(settings.sendMode);
+  const [createBranch, setCreateBranch] = useState(settings.createBranch);
+  const [editedBranchName, setEditedBranchName] = useState(null);
+  const [showCommand, setShowCommand] = useState(false);
+  const branchName = editedBranchName ?? item.workBranch ?? suggestBranchName(item.title, branchPrefix);
+  const clipboardText = buildClipboardText(item, settings, mode);
+  const branchOk = !createBranch || isValidBranchName(branchName);
+  const hasPrompt = Boolean(item.prompt.trim() || item.title.trim());
+  const commandForItem = settings.commands[item.difficulty];
+  const binary = commandForItem.trim().split(/\s+/)[0] ?? "";
+  const cli = findAgentCli(binary === "opencode" ? "opencode" : "claude");
+  const targetModel = readModelFromCommand(commandForItem);
+  const switching = cli.midSessionModelSwitch;
+  return /* @__PURE__ */ ShipReact$3.createElement(
+    "div",
+    {
+      className: "change-send-strip",
+      style: { borderColor: theme.accent },
+      role: "group",
+      "aria-label": "Send to the terminal"
+    },
+    /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-send-modes" }, /* @__PURE__ */ ShipReact$3.createElement(
+      ModeButton,
+      {
+        selected: mode === "launch",
+        label: "New agent",
+        hint: "Paste at a shell prompt in a terminal tab. Pasted into an agent that's already running it becomes a chat message and the flags do nothing.",
+        onClick: () => setMode("launch")
+      }
+    ), /* @__PURE__ */ ShipReact$3.createElement(
+      ModeButton,
+      {
+        selected: mode === "prompt-only",
+        label: "Running agent",
+        hint: "Paste into the message box of an agent that's already going",
+        onClick: () => setMode("prompt-only")
+      }
+    )),
+    /* @__PURE__ */ ShipReact$3.createElement("div", null, /* @__PURE__ */ ShipReact$3.createElement(
+      "button",
+      {
+        className: "change-send-command",
+        style: { color: theme.textMuted },
+        "aria-expanded": showCommand,
+        title: showCommand ? "Hide the full text" : "Show the full text",
+        onClick: () => setShowCommand(!showCommand)
+      },
+      /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-send-caret", "aria-hidden": "true" }, showCommand ? "▾" : "▸"),
+      /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-send-command-text change-mono", style: { color: theme.textSecondary } }, clipboardText || "(nothing to send — give this change a title or a prompt first)")
+    ), showCommand ? /* @__PURE__ */ ShipReact$3.createElement(
+      "div",
+      {
+        className: "change-code change-mono",
+        style: {
+          background: theme.bgSecondary,
+          color: theme.textSecondary,
+          border: `1px solid ${theme.border}`,
+          marginTop: 6
+        }
+      },
+      clipboardText || "(nothing to send — give this change a title or a prompt first)"
+    ) : null, mode === "prompt-only" ? /* @__PURE__ */ ShipReact$3.createElement(ModelWarning, { cli, switching, targetModel }) : null),
+    /* @__PURE__ */ ShipReact$3.createElement("div", null, /* @__PURE__ */ ShipReact$3.createElement("label", { className: "change-check", style: { color: theme.textPrimary } }, /* @__PURE__ */ ShipReact$3.createElement(
+      "input",
+      {
+        type: "checkbox",
+        checked: createBranch,
+        onChange: (event) => setCreateBranch(event.target.checked)
+      }
+    ), "Create a git branch first"), createBranch ? /* @__PURE__ */ ShipReact$3.createElement("div", { style: { marginTop: 7 } }, /* @__PURE__ */ ShipReact$3.createElement(
+      "input",
+      {
+        className: "change-input change-mono",
+        style: {
+          background: theme.bgPrimary,
+          color: theme.textPrimary,
+          border: `1px solid ${branchOk ? theme.border : theme.error}`
+        },
+        value: branchName,
+        spellCheck: false,
+        placeholder: "branch-name",
+        onChange: (event) => setEditedBranchName(event.target.value)
+      }
+    ), !branchOk ? /* @__PURE__ */ ShipReact$3.createElement("div", { style: { color: theme.error, fontSize: 11, marginTop: 5 } }, "Git won’t accept that name — no spaces or ", /* @__PURE__ */ ShipReact$3.createElement("code", null, "~^:?*["), ".") : null, hasUncommittedChanges ? /* @__PURE__ */ ShipReact$3.createElement(
+      "div",
+      {
+        className: "change-warning",
+        style: { background: "rgba(245, 158, 11, 0.12)", color: "var(--warning, #f59e0b)", marginTop: 8 }
+      },
+      "You have uncommitted changes. They’ll come along to the new branch — commit or stash them first if they belong where they are."
+    ) : null) : null),
+    /* @__PURE__ */ ShipReact$3.createElement(
+      "button",
+      {
+        className: "change-btn",
+        style: { background: theme.action, color: theme.actionText },
+        disabled: busy || !branchOk || !hasPrompt,
+        onClick: () => onSend({ mode, createBranch, branchName: branchName.trim() })
+      },
+      busy ? /* @__PURE__ */ ShipReact$3.createElement(Spinner, null) : /* @__PURE__ */ ShipReact$3.createElement("span", null, "▶"),
+      /* @__PURE__ */ ShipReact$3.createElement("span", null, busy ? "Working…" : "Copy and focus terminal")
+    )
+  );
+}
+function ModelWarning({
+  cli,
+  switching,
+  targetModel
+}) {
+  const theme = useTheme();
+  const [copied, setCopied] = useState(false);
+  const line = switching.supported && targetModel ? switching.command(targetModel) : null;
+  return /* @__PURE__ */ ShipReact$3.createElement(
+    "div",
+    {
+      className: "change-warning",
+      style: { background: "rgba(127, 127, 127, 0.12)", color: theme.textSecondary, marginTop: 7 }
+    },
+    "This uses whatever model that session already started with",
+    targetModel ? `, not ${targetModel}` : "",
+    ". ",
+    switching.how,
+    line ? /* @__PURE__ */ ShipReact$3.createElement("div", { style: { marginTop: 8 } }, /* @__PURE__ */ ShipReact$3.createElement(
+      "button",
+      {
+        className: "change-btn",
+        style: { background: "transparent", color: theme.accent, border: `1px solid ${theme.border}` },
+        onClick: () => {
+          void copyText(line).then((ok) => setCopied(ok));
+        }
+      },
+      copied ? `Copied ${line}` : `Copy ${line}`
+    )) : null
+  );
+}
+function ModeButton({
+  selected,
+  label,
+  hint,
+  onClick
+}) {
+  const theme = useTheme();
+  return /* @__PURE__ */ ShipReact$3.createElement(
+    "button",
+    {
+      className: "change-radio",
+      style: {
+        background: selected ? "rgba(127, 127, 127, 0.14)" : "transparent",
+        border: `1px solid ${selected ? theme.accent : theme.border}`,
+        color: selected ? theme.textPrimary : theme.textSecondary,
+        fontWeight: selected ? 600 : 400
+      },
+      title: hint,
+      "aria-pressed": selected,
+      onClick
+    },
+    label
+  );
+}
+const ShipReact$2 = window.__SHIPSTUDIO_REACT__;
 const DIFFICULTIES$1 = ["easy", "normal", "hard"];
+const VISIBLE_FIELDS = 3;
+function useAutoGrow(ref, value) {
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  }, [ref, value]);
+}
 function ItemEditor({
   item,
   shell,
@@ -2166,6 +2390,7 @@ function ItemEditor({
   customTemplates,
   canMoveUp,
   canMoveDown,
+  sending,
   onChange,
   onMove,
   onDelete
@@ -2181,8 +2406,15 @@ function ItemEditor({
   const [error, setError] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
+  const [showAllFields, setShowAllFields] = useState(false);
+  const notesRef = useRef(null);
+  useAutoGrow(notesRef, item.notes);
   const nudges = lintPrompt(item.prompt);
   const template = findTemplate(item.template, customTemplates);
+  const hiddenFields = template ? template.fields.slice(VISIBLE_FIELDS) : [];
+  const hiddenHaveValues = template !== null && hiddenFields.length > 0 && hasAnyFieldValue({ ...template, fields: hiddenFields }, item.fields);
+  const allFieldsShown = showAllFields || hiddenHaveValues;
+  const visibleFields = template ? allFieldsShown ? template.fields : template.fields.slice(0, VISIBLE_FIELDS) : [];
   const applyEdit = useCallback(
     (patch) => {
       const nextTemplateId = patch.template !== void 0 ? patch.template : item.template;
@@ -2200,8 +2432,11 @@ function ItemEditor({
     [applyEdit, item.fields]
   );
   const pickTemplate = useCallback(
-    (next) => applyEdit({ template: item.template === next.id ? null : next.id }),
-    [applyEdit, item.template]
+    (id) => {
+      setShowAllFields(false);
+      applyEdit({ template: id || null });
+    },
+    [applyEdit]
   );
   const cli = findAgentCli(improveCli);
   const improve = useCallback(async () => {
@@ -2235,24 +2470,10 @@ function ItemEditor({
     });
     setSuggestion(null);
   }, [onChange, suggestion]);
-  return /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-editor", style: { borderTop: `1px solid ${theme.border}` } }, /* @__PURE__ */ ShipReact$3.createElement(
-    "input",
-    {
-      className: "change-input",
-      style: {
-        background: theme.bgPrimary,
-        color: theme.textPrimary,
-        border: `1px solid ${theme.border}`
-      },
-      value: item.title,
-      placeholder: "What needs changing?",
-      spellCheck: false,
-      onChange: (event) => onChange({ title: event.target.value })
-    }
-  ), /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-difficulty-row" }, DIFFICULTIES$1.map((difficulty) => {
+  return /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-editor", style: { borderTop: `1px solid ${theme.border}` } }, /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-props-row" }, /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-difficulty-row" }, DIFFICULTIES$1.map((difficulty) => {
     const selected = item.difficulty === difficulty;
     const color = difficultyColor(difficulty, theme);
-    return /* @__PURE__ */ ShipReact$3.createElement(
+    return /* @__PURE__ */ ShipReact$2.createElement(
       "button",
       {
         key: difficulty,
@@ -2263,29 +2484,29 @@ function ItemEditor({
           color: selected ? color : theme.textSecondary,
           fontWeight: selected ? 600 : 400
         },
+        title: `${DIFFICULTY_LABELS[difficulty]} — picks which model runs it`,
         onClick: () => onChange({ difficulty })
       },
       DIFFICULTY_LABELS[difficulty]
     );
-  })), /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-templates" }, allTemplates(customTemplates).map((entry) => {
-    const active = item.template === entry.id;
-    return /* @__PURE__ */ ShipReact$3.createElement(
-      "button",
-      {
-        key: entry.id,
-        className: `change-template-btn${active ? " change-template-active" : ""}`,
-        style: {
-          border: `1px solid ${active ? theme.accent : theme.border}`,
-          color: active ? theme.accent : theme.textSecondary
-        },
-        title: active ? `Click to remove. ${entry.hint}` : entry.hint,
-        "aria-pressed": active,
-        onClick: () => pickTemplate(entry)
+  })), /* @__PURE__ */ ShipReact$2.createElement(
+    "select",
+    {
+      className: "change-select change-tag-select",
+      style: {
+        background: theme.bgPrimary,
+        color: template ? theme.accent : theme.textSecondary,
+        border: `1px solid ${template ? theme.accent : theme.border}`
       },
-      entry.label,
-      active ? /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-template-x" }, "×") : null
-    );
-  })), template ? /* @__PURE__ */ ShipReact$3.createElement(
+      value: item.template ?? "",
+      title: template ? template.hint : "Pick a tag to get boxes to fill in",
+      "aria-label": "Tag",
+      onChange: (event) => pickTemplate(event.target.value)
+    },
+    /* @__PURE__ */ ShipReact$2.createElement("option", { value: "" }, "No tag"),
+    /* @__PURE__ */ ShipReact$2.createElement("optgroup", { label: "Tags" }, TEMPLATES.map((entry) => /* @__PURE__ */ ShipReact$2.createElement("option", { key: entry.id, value: entry.id }, entry.label))),
+    customTemplates.length > 0 ? /* @__PURE__ */ ShipReact$2.createElement("optgroup", { label: "Your tags" }, customTemplates.map((entry) => /* @__PURE__ */ ShipReact$2.createElement("option", { key: entry.id, value: entry.id }, entry.label))) : null
+  )), template ? /* @__PURE__ */ ShipReact$2.createElement(
     "div",
     {
       className: "change-fields",
@@ -2293,38 +2514,48 @@ function ItemEditor({
       role: "group",
       "aria-label": `${template.label} template fields`
     },
-    template.fields.map((field) => /* @__PURE__ */ ShipReact$3.createElement("label", { className: "change-field", key: field.id }, /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-field-name", style: { color: theme.textMuted } }, field.label), field.multiline ? /* @__PURE__ */ ShipReact$3.createElement(
-      "textarea",
-      {
-        className: "change-input change-field-box change-field-multiline",
+    visibleFields.map((field) => {
+      const shared = {
         style: boxStyle,
         value: item.fields[field.id] ?? "",
-        placeholder: field.placeholder,
+        placeholder: `${field.label} — ${field.placeholder}`,
+        "aria-label": field.label,
+        title: field.label,
         spellCheck: false,
         onChange: (event) => setField(field.id, event.target.value)
-      }
-    ) : /* @__PURE__ */ ShipReact$3.createElement(
-      "input",
+      };
+      return field.multiline ? /* @__PURE__ */ ShipReact$2.createElement(
+        "textarea",
+        {
+          key: field.id,
+          className: "change-input change-field-box change-field-multiline",
+          ...shared
+        }
+      ) : /* @__PURE__ */ ShipReact$2.createElement("input", { key: field.id, className: "change-input change-field-box", ...shared });
+    }),
+    hiddenFields.length > 0 && !hiddenHaveValues ? /* @__PURE__ */ ShipReact$2.createElement(
+      "button",
       {
-        className: "change-input change-field-box",
-        style: boxStyle,
-        value: item.fields[field.id] ?? "",
-        placeholder: field.placeholder,
-        spellCheck: false,
-        onChange: (event) => setField(field.id, event.target.value)
-      }
-    )))
-  ) : null, /* @__PURE__ */ ShipReact$3.createElement("label", { className: "change-field" }, template ? /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-field-name", style: { color: theme.textMuted } }, "Anything else") : null, /* @__PURE__ */ ShipReact$3.createElement(
+        className: "change-fold change-fields-fold",
+        style: { color: theme.textMuted },
+        "aria-expanded": showAllFields,
+        onClick: () => setShowAllFields(!showAllFields)
+      },
+      showAllFields ? "▾ Fewer" : `▸ ${hiddenFields.length} more`
+    ) : null
+  ) : null, /* @__PURE__ */ ShipReact$2.createElement(
     "textarea",
     {
+      ref: notesRef,
       className: "change-textarea",
       style: boxStyle,
       value: item.notes,
-      placeholder: template ? "Optional — anything the boxes above don’t cover" : "The instruction you'll hand to your agent. Or pick a template above to fill in boxes instead.",
+      "aria-label": template ? "Anything else" : "Prompt",
+      placeholder: template ? "Anything else the boxes don’t cover" : "The instruction you'll hand to your agent. Or pick a tag to fill in boxes instead.",
       spellCheck: false,
       onChange: (event) => applyEdit({ notes: event.target.value })
     }
-  )), item.prompt.trim() ? /* @__PURE__ */ ShipReact$3.createElement("div", null, /* @__PURE__ */ ShipReact$3.createElement(
+  ), item.prompt.trim() ? /* @__PURE__ */ ShipReact$2.createElement("div", null, /* @__PURE__ */ ShipReact$2.createElement(
     "button",
     {
       className: "change-fold",
@@ -2336,7 +2567,7 @@ function ItemEditor({
     " Prompt (",
     item.prompt.trim().split(/\s+/).length,
     " words)"
-  ), showPrompt ? /* @__PURE__ */ ShipReact$3.createElement(
+  ), showPrompt ? /* @__PURE__ */ ShipReact$2.createElement(
     "div",
     {
       className: "change-code",
@@ -2347,16 +2578,16 @@ function ItemEditor({
       }
     },
     item.prompt
-  ) : null) : null, nudges.length > 0 ? /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-nudges", style: { color: theme.textMuted } }, nudges.map((nudge) => /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-nudge", key: nudge.id }, /* @__PURE__ */ ShipReact$3.createElement("span", { style: { opacity: 0.7 } }, "•"), nudge.message))) : null, error ? /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-warning", style: { background: "rgba(240, 74, 74, 0.12)", color: theme.error } }, error) : null, suggestion ? /* @__PURE__ */ ShipReact$3.createElement(
+  ) : null) : null, nudges.length > 0 ? /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-nudges", style: { color: theme.textMuted } }, nudges.map((nudge) => /* @__PURE__ */ ShipReact$2.createElement("span", { className: "change-nudge", key: nudge.id }, /* @__PURE__ */ ShipReact$2.createElement("span", { style: { opacity: 0.7 } }, "•"), nudge.message))) : null, error ? /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-warning", style: { background: "rgba(240, 74, 74, 0.12)", color: theme.error } }, error) : null, suggestion ? /* @__PURE__ */ ShipReact$2.createElement(
     "div",
     {
       className: "change-diff",
       style: { background: theme.bgSecondary, border: `1px solid ${theme.border}` }
     },
-    /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-field-label", style: { color: theme.textMuted, marginBottom: 0 } }, "Suggested rewrite"),
-    /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-diff-text" }, suggestion.prompt),
-    /* @__PURE__ */ ShipReact$3.createElement("div", { style: { fontSize: 11, color: theme.textMuted } }, "Also sets difficulty to", " ", /* @__PURE__ */ ShipReact$3.createElement("strong", { style: { color: difficultyColor(suggestion.difficulty, theme) } }, DIFFICULTY_LABELS[suggestion.difficulty]), suggestion.title && suggestion.title !== item.title ? /* @__PURE__ */ ShipReact$3.createElement(ShipReact$3.Fragment, null, " ", "and the title to “", suggestion.title, "”") : null, "."),
-    /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-button-row" }, /* @__PURE__ */ ShipReact$3.createElement(
+    /* @__PURE__ */ ShipReact$2.createElement("span", { className: "change-field-label", style: { color: theme.textMuted, marginBottom: 0 } }, "Suggested rewrite"),
+    /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-diff-text" }, suggestion.prompt),
+    /* @__PURE__ */ ShipReact$2.createElement("div", { style: { fontSize: 11, color: theme.textMuted } }, "Also sets difficulty to", " ", /* @__PURE__ */ ShipReact$2.createElement("strong", { style: { color: difficultyColor(suggestion.difficulty, theme) } }, DIFFICULTY_LABELS[suggestion.difficulty]), suggestion.title && suggestion.title !== item.title ? /* @__PURE__ */ ShipReact$2.createElement(ShipReact$2.Fragment, null, " ", "and the title to “", suggestion.title, "”") : null, "."),
+    /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-button-row" }, /* @__PURE__ */ ShipReact$2.createElement(
       "button",
       {
         className: "change-btn",
@@ -2364,7 +2595,7 @@ function ItemEditor({
         onClick: acceptSuggestion
       },
       "Use this"
-    ), /* @__PURE__ */ ShipReact$3.createElement(
+    ), /* @__PURE__ */ ShipReact$2.createElement(
       "button",
       {
         className: "change-btn",
@@ -2373,7 +2604,17 @@ function ItemEditor({
       },
       "Discard"
     ))
-  ) : null, /* @__PURE__ */ ShipReact$3.createElement("div", { className: "change-editor-actions" }, improveAvailable ? /* @__PURE__ */ ShipReact$3.createElement(
+  ) : null, /* @__PURE__ */ ShipReact$2.createElement(
+    SendPanel,
+    {
+      item,
+      settings: sending.settings,
+      branchPrefix: sending.branchPrefix,
+      hasUncommittedChanges: sending.hasUncommittedChanges,
+      busy: sending.busy,
+      onSend: sending.onSend
+    }
+  ), /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-editor-actions" }, improveAvailable ? /* @__PURE__ */ ShipReact$2.createElement(
     "button",
     {
       className: "change-btn",
@@ -2382,9 +2623,9 @@ function ItemEditor({
       title: `Rewrite this prompt with ${cli.label}${improveModel ? ` (${improveModel})` : ""}`,
       onClick: () => void improve()
     },
-    improving ? /* @__PURE__ */ ShipReact$3.createElement(Spinner, null) : /* @__PURE__ */ ShipReact$3.createElement("span", null, "✨"),
-    /* @__PURE__ */ ShipReact$3.createElement("span", null, improving ? `Asking ${cli.label}…` : "Improve")
-  ) : null, /* @__PURE__ */ ShipReact$3.createElement("span", { className: "change-spacer" }), /* @__PURE__ */ ShipReact$3.createElement(IconButton, { label: "Move up", onClick: () => onMove(-1), disabled: !canMoveUp }, "↑"), /* @__PURE__ */ ShipReact$3.createElement(IconButton, { label: "Move down", onClick: () => onMove(1), disabled: !canMoveDown }, "↓"), confirmDelete ? /* @__PURE__ */ ShipReact$3.createElement(ShipReact$3.Fragment, null, /* @__PURE__ */ ShipReact$3.createElement("span", { style: { fontSize: 11, color: theme.textMuted } }, "Delete?"), /* @__PURE__ */ ShipReact$3.createElement(
+    improving ? /* @__PURE__ */ ShipReact$2.createElement(Spinner, null) : /* @__PURE__ */ ShipReact$2.createElement("span", null, "✨"),
+    /* @__PURE__ */ ShipReact$2.createElement("span", null, improving ? `Asking ${cli.label}…` : "Improve")
+  ) : null, /* @__PURE__ */ ShipReact$2.createElement("span", { className: "change-spacer" }), /* @__PURE__ */ ShipReact$2.createElement(IconButton, { label: "Move up", onClick: () => onMove(-1), disabled: !canMoveUp }, "↑"), /* @__PURE__ */ ShipReact$2.createElement(IconButton, { label: "Move down", onClick: () => onMove(1), disabled: !canMoveDown }, "↓"), confirmDelete ? /* @__PURE__ */ ShipReact$2.createElement(ShipReact$2.Fragment, null, /* @__PURE__ */ ShipReact$2.createElement("span", { style: { fontSize: 11, color: theme.textMuted } }, "Delete?"), /* @__PURE__ */ ShipReact$2.createElement(
     "button",
     {
       className: "change-btn",
@@ -2392,7 +2633,7 @@ function ItemEditor({
       onClick: onDelete
     },
     "Yes"
-  ), /* @__PURE__ */ ShipReact$3.createElement(
+  ), /* @__PURE__ */ ShipReact$2.createElement(
     "button",
     {
       className: "change-btn",
@@ -2405,161 +2646,7 @@ function ItemEditor({
       onClick: () => setConfirmDelete(false)
     },
     "No"
-  )) : /* @__PURE__ */ ShipReact$3.createElement(IconButton, { label: "Delete this change", danger: true, onClick: () => setConfirmDelete(true) }, "✕")));
-}
-const ShipReact$2 = window.__SHIPSTUDIO_REACT__;
-function SendPanel({
-  item,
-  settings,
-  branchPrefix,
-  hasUncommittedChanges,
-  busy,
-  onSend,
-  onClose
-}) {
-  const theme = useTheme();
-  const [mode, setMode] = useState(settings.sendMode);
-  const [createBranch, setCreateBranch] = useState(settings.createBranch);
-  const [branchName, setBranchName] = useState(
-    () => item.workBranch ?? suggestBranchName(item.title, branchPrefix)
-  );
-  const clipboardText = buildClipboardText(item, settings, mode);
-  const branchOk = !createBranch || isValidBranchName(branchName);
-  const hasPrompt = Boolean(item.prompt.trim() || item.title.trim());
-  const commandForItem = settings.commands[item.difficulty];
-  const binary = commandForItem.trim().split(/\s+/)[0] ?? "";
-  const cli = findAgentCli(binary === "opencode" ? "opencode" : "claude");
-  const targetModel = readModelFromCommand(commandForItem);
-  const switching = cli.midSessionModelSwitch;
-  return /* @__PURE__ */ ShipReact$2.createElement(Modal, { title: "Send to the terminal", onClose }, /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-popover-body" }, /* @__PURE__ */ ShipReact$2.createElement(Field, { label: "Where this is going" }, /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-radio-row" }, /* @__PURE__ */ ShipReact$2.createElement(
-    ModeButton,
-    {
-      selected: mode === "launch",
-      title: "New agent",
-      detail: "paste in a terminal tab",
-      onClick: () => setMode("launch")
-    }
-  ), /* @__PURE__ */ ShipReact$2.createElement(
-    ModeButton,
-    {
-      selected: mode === "prompt-only",
-      title: "Message a running agent",
-      detail: "paste in the agent's box",
-      onClick: () => setMode("prompt-only")
-    }
-  ))), /* @__PURE__ */ ShipReact$2.createElement(Field, { label: mode === "launch" ? "Command that gets copied" : "Text that gets copied" }, /* @__PURE__ */ ShipReact$2.createElement(
-    "div",
-    {
-      className: "change-code change-mono",
-      style: {
-        background: theme.bgSecondary,
-        color: theme.textSecondary,
-        border: `1px solid ${theme.border}`
-      }
-    },
-    clipboardText || "(nothing to send — give this change a title or a prompt first)"
-  ), mode === "launch" ? /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-settings-note", style: { color: theme.textMuted, marginTop: 7 } }, "Paste at a ", /* @__PURE__ */ ShipReact$2.createElement("strong", null, "shell prompt"), " in a normal terminal tab. Pasted into a running agent it becomes a chat message — the flags do nothing and the model won’t change.") : /* @__PURE__ */ ShipReact$2.createElement(ModelWarning, { cli, switching, targetModel })), /* @__PURE__ */ ShipReact$2.createElement("div", null, /* @__PURE__ */ ShipReact$2.createElement("label", { className: "change-check", style: { color: theme.textPrimary } }, /* @__PURE__ */ ShipReact$2.createElement(
-    "input",
-    {
-      type: "checkbox",
-      checked: createBranch,
-      onChange: (event) => setCreateBranch(event.target.checked)
-    }
-  ), "Create a git branch for this change first"), createBranch ? /* @__PURE__ */ ShipReact$2.createElement("div", { style: { marginTop: 9 } }, /* @__PURE__ */ ShipReact$2.createElement(
-    "input",
-    {
-      className: "change-input change-mono",
-      style: {
-        background: theme.bgPrimary,
-        color: theme.textPrimary,
-        border: `1px solid ${branchOk ? theme.border : theme.error}`
-      },
-      value: branchName,
-      spellCheck: false,
-      placeholder: "branch-name",
-      onChange: (event) => setBranchName(event.target.value)
-    }
-  ), !branchOk ? /* @__PURE__ */ ShipReact$2.createElement("div", { style: { color: theme.error, fontSize: 11, marginTop: 5 } }, "Git won’t accept that name — no spaces or ", /* @__PURE__ */ ShipReact$2.createElement("code", null, "~^:?*["), ".") : null, hasUncommittedChanges ? /* @__PURE__ */ ShipReact$2.createElement(
-    "div",
-    {
-      className: "change-warning",
-      style: { background: "rgba(245, 158, 11, 0.12)", color: "var(--warning, #f59e0b)", marginTop: 8 }
-    },
-    "You have uncommitted changes. They’ll come along to the new branch — commit or stash them first if they belong where they are."
-  ) : null) : null), /* @__PURE__ */ ShipReact$2.createElement("div", { className: "change-button-row" }, /* @__PURE__ */ ShipReact$2.createElement(
-    "button",
-    {
-      className: "change-btn",
-      style: { background: theme.action, color: theme.actionText },
-      disabled: busy || !branchOk || !hasPrompt,
-      onClick: () => onSend({ mode, createBranch, branchName: branchName.trim() })
-    },
-    busy ? /* @__PURE__ */ ShipReact$2.createElement(Spinner, null) : /* @__PURE__ */ ShipReact$2.createElement("span", null, "▶"),
-    /* @__PURE__ */ ShipReact$2.createElement("span", null, busy ? "Working…" : "Copy and focus terminal")
-  ), /* @__PURE__ */ ShipReact$2.createElement(
-    "button",
-    {
-      className: "change-btn",
-      style: { background: "transparent", color: theme.textMuted, border: `1px solid ${theme.border}` },
-      disabled: busy,
-      onClick: onClose
-    },
-    "Cancel"
-  ))));
-}
-function ModelWarning({
-  cli,
-  switching,
-  targetModel
-}) {
-  const theme = useTheme();
-  const [copied, setCopied] = useState(false);
-  const line = switching.supported && targetModel ? switching.command(targetModel) : null;
-  return /* @__PURE__ */ ShipReact$2.createElement(
-    "div",
-    {
-      className: "change-warning",
-      style: { background: "rgba(127, 127, 127, 0.12)", color: theme.textSecondary, marginTop: 7 }
-    },
-    "This uses whatever model that session already started with",
-    targetModel ? `, not ${targetModel}` : "",
-    ". ",
-    switching.how,
-    line ? /* @__PURE__ */ ShipReact$2.createElement("div", { style: { marginTop: 8 } }, /* @__PURE__ */ ShipReact$2.createElement(
-      "button",
-      {
-        className: "change-btn",
-        style: { background: "transparent", color: theme.accent, border: `1px solid ${theme.border}` },
-        onClick: () => {
-          void copyText(line).then((ok) => setCopied(ok));
-        }
-      },
-      copied ? `Copied ${line}` : `Copy ${line}`
-    )) : null
-  );
-}
-function ModeButton({
-  selected,
-  title,
-  detail,
-  onClick
-}) {
-  const theme = useTheme();
-  return /* @__PURE__ */ ShipReact$2.createElement(
-    "button",
-    {
-      className: "change-radio",
-      style: {
-        background: selected ? "rgba(127, 127, 127, 0.14)" : "transparent",
-        border: `1px solid ${selected ? theme.accent : theme.border}`,
-        color: selected ? theme.textPrimary : theme.textSecondary
-      },
-      onClick
-    },
-    /* @__PURE__ */ ShipReact$2.createElement("strong", { style: { fontWeight: 600 } }, title),
-    /* @__PURE__ */ ShipReact$2.createElement("br", null),
-    /* @__PURE__ */ ShipReact$2.createElement("span", { style: { color: theme.textMuted, fontSize: 10.5 } }, detail)
-  );
+  )) : /* @__PURE__ */ ShipReact$2.createElement(IconButton, { label: "Delete this change", danger: true, onClick: () => setConfirmDelete(true) }, "✕")));
 }
 function parseOpenCodeCatalogue(stdout) {
   const models = [];
@@ -3289,7 +3376,6 @@ function Panel({ onClose }) {
   const [hydrated, setHydrated] = useState(false);
   const [view, setView] = useState("list");
   const [expandedId, setExpandedId] = useState(null);
-  const [sendId, setSendId] = useState(null);
   const [sending, setSending] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -3403,7 +3489,6 @@ function Panel({ onClose }) {
         }
         context.actions.focusTerminal();
         setItems((items) => updateItem(setStatus(items, item.id, "doing"), item.id, { workBranch }));
-        setSendId(null);
         setJustSentId(item.id);
         window.setTimeout(() => setJustSentId((id) => id === item.id ? null : id), 700);
         const where = options.mode === "launch" ? "paste at a shell prompt in a terminal tab" : "paste into the running agent";
@@ -3421,7 +3506,7 @@ function Panel({ onClose }) {
     (item) => {
       const settings = storedRef.current.settings;
       if (settings.createBranch) {
-        setSendId(item.id);
+        setExpandedId(item.id);
         return;
       }
       void performSend(item, { mode: settings.sendMode, createBranch: false, branchName: "" });
@@ -3433,11 +3518,20 @@ function Panel({ onClose }) {
   }
   const groups = groupItems(stored.items);
   const openCount = groups.todo.length + groups.doing.length;
-  const sendItem = sendId ? stored.items.find((item) => item.id === sendId) ?? null : null;
   const effectivePrefix = stored.settings.branchPrefix.trim() || detectedPrefix;
   const currentBranch = ctx.project.currentBranch;
   const improveAvailable = installedClis[stored.settings.improveCli] === true;
   const customTemplates = customTags.filter(isUsable).map(toTemplate);
+  const sendingFor = (item) => {
+    var _a;
+    return {
+      settings: stored.settings,
+      branchPrefix: effectivePrefix,
+      hasUncommittedChanges: ((_a = ctx.project) == null ? void 0 : _a.hasUncommittedChanges) ?? false,
+      busy: sending,
+      onSend: (options) => void performSend(item, options)
+    };
+  };
   const renderGroup = (label, items) => items.length === 0 ? null : /* @__PURE__ */ ShipReact.createElement("div", { className: "change-group", key: label }, /* @__PURE__ */ ShipReact.createElement("div", { className: "change-group-label", style: { color: theme.textMuted } }, label), items.map((item, index) => {
     var _a;
     return /* @__PURE__ */ ShipReact.createElement(
@@ -3462,9 +3556,8 @@ function Panel({ onClose }) {
           currentBranch,
           onToggleExpand: () => setExpandedId(expandedId === item.id ? null : item.id),
           onToggleDone: () => toggleDone(item),
-          onCycleDifficulty: () => patchItem(item.id, { difficulty: nextDifficulty(item.difficulty) }),
-          onSend: () => quickSend(item),
-          onOptions: () => setSendId(item.id)
+          onTitleChange: (title) => patchItem(item.id, { title }),
+          onSend: () => quickSend(item)
         }
       ),
       expandedId === item.id ? /* @__PURE__ */ ShipReact.createElement(
@@ -3480,6 +3573,7 @@ function Panel({ onClose }) {
           customTemplates,
           canMoveUp: index > 0,
           canMoveDown: index < items.length - 1,
+          sending: sendingFor(item),
           onChange: (patch) => patchItem(item.id, patch),
           onMove: (direction) => setItems((current) => moveItem(current, item.id, direction)),
           onDelete: () => {
@@ -3561,25 +3655,12 @@ function Panel({ onClose }) {
           currentBranch,
           onToggleExpand: () => setExpandedId(expandedId === item.id ? null : item.id),
           onToggleDone: () => toggleDone(item),
-          onCycleDifficulty: () => {
-          },
-          onSend: () => quickSend(item),
-          onOptions: () => setSendId(item.id)
+          onTitleChange: (title) => patchItem(item.id, { title }),
+          onSend: () => quickSend(item)
         }
       )
     )) : null) : null)
-  ), sendItem ? /* @__PURE__ */ ShipReact.createElement(
-    SendPanel,
-    {
-      item: sendItem,
-      settings: stored.settings,
-      branchPrefix: effectivePrefix,
-      hasUncommittedChanges: ctx.project.hasUncommittedChanges,
-      busy: sending,
-      onSend: (options) => void performSend(sendItem, options),
-      onClose: () => setSendId(null)
-    }
-  ) : null);
+  ));
 }
 function ToolbarButton() {
   const dock = useDock();

@@ -21,7 +21,6 @@ import {
   emptyStored,
   groupItems,
   moveItem,
-  nextDifficulty,
   readStored,
   removeItem,
   setStatus,
@@ -43,9 +42,9 @@ import { loadCustomTags, saveCustomTags, toTemplate, isUsable, type CustomTag } 
 import { buildClipboardText } from './send.ts';
 import { injectStyles, removeStyles } from './styles.ts';
 import { ItemEditor } from './ui/editor.tsx';
-import { IconButton, Modal, PanelFrame } from './ui/parts.tsx';
+import { IconButton, PanelFrame } from './ui/parts.tsx';
 import { ItemRow } from './ui/row.tsx';
-import { SendPanel, type SendOptions } from './ui/send-panel.tsx';
+import type { SendOptions } from './ui/send-panel.tsx';
 import { SettingsView } from './ui/settings.tsx';
 
 /** How long after the last keystroke the list is written to disk. */
@@ -78,7 +77,6 @@ function Panel({ onClose }: { onClose: () => void }) {
   const [hydrated, setHydrated] = useState(false);
   const [view, setView] = useState<'list' | 'settings'>('list');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [sendId, setSendId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
   const [draft, setDraft] = useState('');
@@ -255,7 +253,6 @@ function Panel({ onClose }: { onClose: () => void }) {
 
         context.actions.focusTerminal();
         setItems((items) => updateItem(setStatus(items, item.id, 'doing'), item.id, { workBranch }));
-        setSendId(null);
 
         // Flash the row so the copy is acknowledged on screen, not only in a
         // toast that may be looked away from.
@@ -282,14 +279,16 @@ function Panel({ onClose }: { onClose: () => void }) {
   );
 
   /**
-   * The ▶ button. Sends straight away, unless a branch would be created — a
-   * git command should never run without you seeing the name it will use.
+   * The ▶ button on a row. Sends straight away, unless a branch would be
+   * created — a git command should never run without you seeing the name it
+   * will use, so that case opens the change instead, where the send options
+   * (branch name included) are on screen.
    */
   const quickSend = useCallback(
     (item: ChangeItem) => {
       const settings = storedRef.current.settings;
       if (settings.createBranch) {
-        setSendId(item.id);
+        setExpandedId(item.id);
         return;
       }
       void performSend(item, { mode: settings.sendMode, createBranch: false, branchName: '' });
@@ -314,7 +313,6 @@ function Panel({ onClose }: { onClose: () => void }) {
 
   const groups = groupItems(stored.items);
   const openCount = groups.todo.length + groups.doing.length;
-  const sendItem = sendId ? (stored.items.find((item) => item.id === sendId) ?? null) : null;
   const effectivePrefix = stored.settings.branchPrefix.trim() || detectedPrefix;
   const currentBranch = ctx.project.currentBranch;
   /** ✨ Improve only works if the CLI it's pointed at is actually installed. */
@@ -322,6 +320,19 @@ function Panel({ onClose }: { onClose: () => void }) {
   /* Half-finished tags stay out of the chip row until they'd actually do
      something — a nameless tag with no boxes is noise, not a choice. */
   const customTemplates = customTags.filter(isUsable).map(toTemplate);
+
+  /**
+   * How to send one item. Built here rather than in `ItemEditor` so the editor
+   * needs no knowledge of branches, settings or the send flow — it just draws
+   * the section and calls back.
+   */
+  const sendingFor = (item: ChangeItem) => ({
+    settings: stored.settings,
+    branchPrefix: effectivePrefix,
+    hasUncommittedChanges: ctx.project?.hasUncommittedChanges ?? false,
+    busy: sending,
+    onSend: (options: SendOptions) => void performSend(item, options),
+  });
 
   /** One group of rows, each expanding into its editor in place. */
   const renderGroup = (label: string, items: ChangeItem[]) =>
@@ -353,11 +364,8 @@ function Panel({ onClose }: { onClose: () => void }) {
               currentBranch={currentBranch}
               onToggleExpand={() => setExpandedId(expandedId === item.id ? null : item.id)}
               onToggleDone={() => toggleDone(item)}
-              onCycleDifficulty={() =>
-                patchItem(item.id, { difficulty: nextDifficulty(item.difficulty) })
-              }
+              onTitleChange={(title) => patchItem(item.id, { title })}
               onSend={() => quickSend(item)}
-              onOptions={() => setSendId(item.id)}
             />
             {expandedId === item.id ? (
               <ItemEditor
@@ -371,6 +379,7 @@ function Panel({ onClose }: { onClose: () => void }) {
                 customTemplates={customTemplates}
                 canMoveUp={index > 0}
                 canMoveDown={index < items.length - 1}
+                sending={sendingFor(item)}
                 onChange={(patch) => patchItem(item.id, patch)}
                 onMove={(direction) => setItems((current) => moveItem(current, item.id, direction))}
                 onDelete={() => {
@@ -504,9 +513,8 @@ function Panel({ onClose }: { onClose: () => void }) {
                       currentBranch={currentBranch}
                       onToggleExpand={() => setExpandedId(expandedId === item.id ? null : item.id)}
                       onToggleDone={() => toggleDone(item)}
-                      onCycleDifficulty={() => {}}
+                      onTitleChange={(title) => patchItem(item.id, { title })}
                       onSend={() => quickSend(item)}
-                      onOptions={() => setSendId(item.id)}
                     />
                   </div>
                 ))
@@ -516,18 +524,6 @@ function Panel({ onClose }: { onClose: () => void }) {
         </>
         )}
       </PanelFrame>
-
-      {sendItem ? (
-        <SendPanel
-          item={sendItem}
-          settings={stored.settings}
-          branchPrefix={effectivePrefix}
-          hasUncommittedChanges={ctx.project.hasUncommittedChanges}
-          busy={sending}
-          onSend={(options) => void performSend(sendItem, options)}
-          onClose={() => setSendId(null)}
-        />
-      ) : null}
     </>
   );
 }

@@ -19,60 +19,6 @@ import {
 } from '../dock.ts';
 import { getLayoutReport, subscribeLayout } from '../hostLayout.ts';
 
-/** The dimmed, centred dialog every view in this plugin renders inside. */
-export function Modal({
-  title,
-  onClose,
-  headerExtra,
-  children,
-}: {
-  title: ReactNode;
-  onClose: () => void;
-  /** Buttons shown to the left of the close button. */
-  headerExtra?: ReactNode;
-  children: ReactNode;
-}) {
-  const theme = useTheme();
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return (
-    <div className="change-overlay" onClick={onClose}>
-      <div
-        className="change-modal"
-        style={{
-          background: theme.bgPrimary,
-          color: theme.textPrimary,
-          border: `1px solid ${theme.border}`,
-        }}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="change-modal-header" style={{ borderBottom: `1px solid ${theme.border}` }}>
-          <span>{title}</span>
-          <span className="change-header-actions">
-            {headerExtra}
-            <button
-              className="change-close"
-              style={{ color: theme.textMuted }}
-              title="Close"
-              onClick={onClose}
-            >
-              ✕
-            </button>
-          </span>
-        </div>
-        <div className="change-modal-body">{children}</div>
-      </div>
-    </div>
-  );
-}
-
 /**
  * The main panel's frame: a small floating window, or docked to the right edge.
  *

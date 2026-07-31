@@ -191,7 +191,7 @@ function viewport(): Viewport {
 
 /** Is this part of the plugin's own UI? Those must never be measured. */
 function isOurs(element: Element): boolean {
-  return Boolean(element.closest('.change-frame, .change-overlay'));
+  return Boolean(element.closest('.change-frame'));
 }
 
 /**

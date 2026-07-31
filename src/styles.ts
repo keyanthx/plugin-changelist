@@ -25,13 +25,12 @@ export const CSS = `
  */
 @media (prefers-reduced-motion: reduce) {
   .change-frame,
-  .change-modal,
+  .change-send-strip,
   .change-row,
   .change-row-sent,
   .change-row-actions,
   .change-row-open,
   .change-row-chevron,
-  .change-template-x,
   .change-dot,
   .change-resize-handle {
     animation: none !important;
@@ -44,8 +43,9 @@ export const CSS = `
 
 /*
  * The panel never dims the app behind it, in either state — the whole point of
- * pinning a change list is to keep working while it's visible. z-index sits
- * below the send/settings modals so those still layer on top.
+ * pinning a change list is to keep working while it's visible. Nothing in this
+ * plugin overlays any more: settings swap into the same frame, and send options
+ * open inline on their row.
  */
 .change-frame {
   position: fixed;
@@ -140,8 +140,7 @@ export const CSS = `
  * (Note for future edits: this file is one big template literal — backticks in
  * these comments would end the string.)
  */
-.change-frame > .change-frame-body,
-.change-overlay .change-modal-body {
+.change-frame > .change-frame-body {
   overflow-y: auto !important;
   /*
    * auto, not hidden. Hidden made anything past the right edge unreachable
@@ -178,69 +177,29 @@ export const CSS = `
 .change-frame .change-button-row,
 .change-frame .change-tag-head,
 .change-frame .change-tag-box-row,
-.change-frame .change-templates {
+.change-frame .change-send-modes,
+.change-frame .change-send-command,
+.change-frame .change-props-row {
   display: flex !important;
   flex-direction: row !important;
 }
 
 .change-frame .change-settings,
 .change-frame .change-fields,
-.change-frame .change-field,
 .change-frame .change-tag-list,
 .change-frame .change-tag-card,
 .change-frame .change-tag-boxes,
 .change-frame .change-editor,
+.change-frame .change-send-strip,
 .change-frame .change-popover-body,
 .change-frame .change-settings-grid {
   display: flex !important;
   flex-direction: column !important;
 }
 
-/* ---------------------------------------------------------------- modal */
-
-/* Still used for the transient dialogs — send options and settings. Those DO
-   dim, because they want an answer before you carry on. */
-.change-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(2px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-}
-
-.change-modal {
-  width: min(760px, 94vw);
-  max-height: 88vh;
-  display: flex;
-  flex-direction: column;
-  border-radius: 10px;
-  overflow: hidden;
-  animation: changeFadeIn 0.12s ease-out;
-}
-
-.change-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  font-size: 13px;
-  font-weight: 600;
-  flex: none;
-}
+/* --------------------------------------------------------- panel header */
 
 .change-header-actions { display: flex; align-items: center; gap: 4px; }
-
-.change-modal-body {
-  padding: 14px 16px 18px;
-  font-size: 13px;
-  line-height: 1.5;
-  overscroll-behavior: contain;
-  /* Its overflow-y is set by the defended rule above, alongside the panel's. */
-}
 
 .change-close {
   background: none;
@@ -269,8 +228,12 @@ export const CSS = `
 }
 
 .change-textarea {
-  min-height: 108px;
-  resize: vertical;
+  /* Starts small and grows to fit — see useAutoGrow in editor.tsx. It used to
+     reserve 108px whether or not anything was written in it. resize is off
+     because a dragged height would be overwritten on the next keystroke. */
+  min-height: 56px;
+  resize: none;
+  overflow-y: hidden;
   line-height: 1.55;
 }
 
@@ -290,6 +253,18 @@ export const CSS = `
   white-space: nowrap;
 }
 .change-btn:disabled { opacity: 0.5; cursor: default; }
+
+/*
+ * Button labels take the button's colour, whatever the host says.
+ *
+ * Our buttons set their text colour inline on the <button>, but the label is
+ * wrapped in a <span> so the flex gap between icon and text applies. A host rule
+ * as ordinary as ".toolbar span { color: var(--text-muted) }" then targets that
+ * span directly and beats the inherited colour — which renders "Copy and focus
+ * terminal" in grey on a solid blue button, i.e. unreadable. Two classes plus an
+ * element out-specifies that shape of rule without needing !important.
+ */
+.change-frame .change-btn > span { color: inherit; }
 
 .change-icon-btn {
   background: none;
@@ -428,6 +403,42 @@ export const CSS = `
 
 .change-row-spacer { flex: 1 1 0; min-width: 0; }
 
+/*
+ * The title box, shown in place of the open button while a change is expanded.
+ *
+ * Deliberately borderless and transparent until focused, so an open row still
+ * reads as a heading rather than sprouting a form field where the title was.
+ */
+.change-row-title-input {
+  flex: 1 1 0;
+  min-width: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 5px;
+  outline: none;
+}
+.change-row-title-input:hover { border-color: rgba(127, 127, 127, 0.3); }
+.change-row-title-input:focus { border-color: rgba(127, 127, 127, 0.55); }
+
+/* Takes over as the collapse control once the title is editable. Sized like the
+   row's other icon buttons so it stays an easy target. */
+.change-row-collapse {
+  flex: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 6px 7px;
+  border-radius: 5px;
+  opacity: 0.75;
+}
+.change-row-collapse:hover { background: rgba(127, 127, 127, 0.16); opacity: 1; }
+
 /* "No prompt yet" — quiet, but present, because sending without one hands the
    agent nothing but the title. */
 .change-no-prompt {
@@ -474,19 +485,6 @@ export const CSS = `
 
 .change-row-sent { animation: changeRowSent 0.7s ease-out; }
 
-.change-chip {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 2px 5px;
-  border-radius: 4px;
-  border: none;
-  cursor: pointer;
-  font-family: inherit;
-  flex: none;
-  line-height: 1.4;
-}
-
 /* The branch signal: an icon costing ~11px, with the name in its tooltip. As
    text this was 92px of a 248px row and left the title truncated. */
 .change-branch-mark {
@@ -505,33 +503,13 @@ export const CSS = `
 
 /* --------------------------------------------------------------- editor */
 
-.change-editor { padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 11px; }
+.change-editor { padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 
-.change-templates { display: flex; flex-wrap: wrap; gap: 5px; }
-
-.change-template-btn {
-  font-size: 11px;
-  padding: 4px 9px;
-  border-radius: 999px;
-  cursor: pointer;
-  font-family: inherit;
-  background: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-/* The active chip carries a ×, so it reads as a removable pill and it's clear
-   it can be clicked off rather than only swapped for another. */
-.change-template-active { background: rgba(127, 127, 127, 0.12); }
-
-.change-template-x {
-  font-size: 13px;
-  line-height: 1;
-  opacity: 0.55;
-  transition: opacity 0.12s ease-out;
-}
-.change-template-active:hover .change-template-x { opacity: 1; }
+/* Difficulty and tag on one line. Wraps at a narrow dock rather than squeezing
+   the three difficulty buttons into something unreadable. */
+.change-props-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.change-props-row .change-difficulty-row { flex: 1 1 145px; }
+.change-tag-select { flex: 1 1 96px; }
 
 /*
  * The template's boxes, in a panel of their own.
@@ -545,26 +523,22 @@ export const CSS = `
 .change-fields {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
   min-width: 0;
-  padding: 10px;
+  padding: 8px;
   border: 1px solid;
   border-radius: 8px;
   background: rgba(127, 127, 127, 0.05);
 }
 
-.change-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+/* Each box carries its own label in its placeholder, so there is no caption
+   above it. Five captions cost 105px — a third of this panel — for text that
+   repeats what the placeholder already says. */
+.change-field-box { padding: 4px 8px; }
+.change-field-multiline { min-height: 46px; resize: vertical; line-height: 1.5; }
 
-.change-field-name {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-}
-
-/* Shorter than the free-text box: these hold a phrase, not a paragraph. */
-.change-field-box { padding: 6px 8px; }
-.change-field-multiline { min-height: 52px; resize: vertical; line-height: 1.5; }
+/* "2 more" — sits inside the panel so it reads as part of the tag's form. */
+.change-fields-fold { margin-bottom: 0; align-self: flex-start; }
 
 .change-nudges { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; }
 .change-nudge { display: inline-flex; align-items: center; gap: 4px; }
@@ -627,6 +601,72 @@ export const CSS = `
 
 .change-popover-body { display: flex; flex-direction: column; gap: 13px; }
 
+/*
+ * The send options, inside the expanded change.
+ *
+ * Same recipe as .change-fields — a thin accent outline over a faint neutral
+ * tint — so it reads as one labelled region of the editor rather than loose
+ * controls at the bottom of it. No margin: it's a flex child of .change-editor
+ * like every other block there, and lines up with the title box above it.
+ */
+.change-send-strip {
+  padding: 9px;
+  border: 1px solid;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  animation: changeRowIn 0.14s ease-out;
+}
+
+/*
+ * Two destinations, side by side — the same trick as .change-difficulty-row.
+ *
+ * A fixed flex-basis wraps them onto two lines the moment the dock gets narrow:
+ * at 260px there are 192px to share, and two 96px buttons plus a 6px gap is
+ * already 198. Basis 0 lets them split whatever width there actually is.
+ */
+.change-send-modes { display: flex; gap: 6px; min-width: 0; flex-wrap: nowrap; }
+.change-send-modes .change-radio {
+  flex: 1 1 0;
+  min-width: 0;
+  /* Tight horizontally so "Running agent" still fits whole at 260px. */
+  padding: 5px 6px;
+  text-align: center;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The command as one truncated line, the whole thing a click away. */
+.change-send-command {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.change-send-caret { flex: none; font-size: 9px; }
+.change-send-command-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.change-send-note { font-size: 11px; line-height: 1.5; margin-top: 6px; overflow-wrap: anywhere; }
+
 .change-code {
   border-radius: 6px;
   padding: 9px 10px;
@@ -658,6 +698,8 @@ export const CSS = `
 .change-difficulty-row .change-radio {
   flex: 1 1 0;
   min-width: 0;
+  /* Tighter than a standalone radio — these sit on a shared row now. */
+  padding: 5px 8px;
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
