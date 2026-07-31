@@ -18,7 +18,7 @@ import {
   type ChangeItem,
   type Difficulty,
 } from '../model.ts';
-import { IconButton } from './parts.tsx';
+import { AutoGrowTextarea, IconButton } from './parts.tsx';
 
 /** Difficulty colours. There is no `warning` in the theme, hence the fallback. */
 export function difficultyColor(difficulty: Difficulty, theme: ReturnType<typeof useTheme>): string {
@@ -92,14 +92,22 @@ export function ItemRow({
          * beside it takes over as the collapse control.
          */
         <>
-          <input
-            className="change-row-title-input"
+          <AutoGrowTextarea
+            className="change-row-title-input change-field-grow"
             style={{ color: theme.textPrimary }}
             value={item.title}
             placeholder="What needs changing?"
-            aria-label="Title"
+            ariaLabel="Title"
             spellCheck={false}
             onChange={(event) => onTitleChange(event.target.value)}
+            onKeyDown={(event) => {
+              // A title stays single-line: Enter commits it, Shift+Enter adds
+              // a line break.
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+            }}
           />
           <button
             className="change-row-collapse"

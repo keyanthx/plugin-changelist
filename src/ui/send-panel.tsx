@@ -20,7 +20,7 @@ import { useState } from 'react';
 import { findAgentCli, readModelFromCommand } from '../agents.ts';
 import { copyText } from '../clipboard.ts';
 import { useTheme } from '../context.ts';
-import { type ChangeItem, type SendMode, type Settings } from '../model.ts';
+import { branchForItem, shouldShowBranch, type ChangeItem, type SendMode, type Settings } from '../model.ts';
 import { buildClipboardText, isValidBranchName, suggestBranchName } from '../send.ts';
 import { Spinner } from './parts.tsx';
 
@@ -34,6 +34,7 @@ export function SendPanel({
   item,
   settings,
   branchPrefix,
+  currentBranch,
   hasUncommittedChanges,
   busy,
   onSend,
@@ -42,6 +43,12 @@ export function SendPanel({
   settings: Settings;
   /** Settings prefix, or Ship Studio's own preference when that's empty. */
   branchPrefix: string;
+  /**
+   * The branch checked out right now. When it differs from the branch this
+   * note belongs to and no new branch is being created, the send would hand
+   * the agent the wrong branch's working tree — so we say so.
+   */
+  currentBranch: string | null;
   hasUncommittedChanges: boolean;
   busy: boolean;
   onSend: (options: SendOptions) => void;
@@ -59,8 +66,6 @@ export function SendPanel({
    * following.
    */
   const [editedBranchName, setEditedBranchName] = useState<string | null>(null);
-  /** The command is one truncated line until you ask to see all of it. */
-  const [showCommand, setShowCommand] = useState(false);
 
   const branchName =
     editedBranchName ?? item.workBranch ?? suggestBranchName(item.title, branchPrefix);
@@ -68,6 +73,16 @@ export function SendPanel({
   const clipboardText = buildClipboardText(item, settings, mode);
   const branchOk = !createBranch || isValidBranchName(branchName);
   const hasPrompt = Boolean(item.prompt.trim() || item.title.trim());
+
+  /**
+   * Sending on a different branch than the note belongs to is a silent
+   * mismatch — the agent works on wherever you're standing, not where the
+   * change was noticed. Creating a branch fixes it, so the warning disappears
+   * the moment the checkbox is ticked.
+   */
+  const itemBranch = branchForItem(item);
+  const branchMismatch =
+    !createBranch && currentBranch !== null && currentBranch !== '' && shouldShowBranch(itemBranch, currentBranch);
 
   /**
    * Which tool this difficulty's command actually runs, read from the command
@@ -108,48 +123,44 @@ export function SendPanel({
       </div>
 
       {/*
-       * The exact text that will be copied. Collapsed to a single truncated
-       * line by default — you nearly always just want to confirm it starts with
-       * the right tool and model — with the whole thing one click away.
+       * The exact text that will be copied. Hidden entirely unless the setting
+       * says otherwise — when it's off, no preview and nothing to expand.
        */}
-      <div>
-        <button
-          className="change-send-command"
-          style={{ color: theme.textMuted }}
-          aria-expanded={showCommand}
-          title={showCommand ? 'Hide the full text' : 'Show the full text'}
-          onClick={() => setShowCommand(!showCommand)}
+      {settings.showCopiedText ? (
+        <div
+          className="change-code change-mono"
+          style={{
+            background: theme.bgSecondary,
+            color: theme.textSecondary,
+            border: `1px solid ${theme.border}`,
+          }}
         >
-          <span className="change-send-caret" aria-hidden="true">
-            {showCommand ? '▾' : '▸'}
-          </span>
-          <span className="change-send-command-text change-mono" style={{ color: theme.textSecondary }}>
-            {clipboardText || '(nothing to send — give this change a title or a prompt first)'}
-          </span>
-        </button>
+          {clipboardText || '(nothing to send — give this change a title or a prompt first)'}
+        </div>
+      ) : null}
 
-        {showCommand ? (
-          <div
-            className="change-code change-mono"
-            style={{
-              background: theme.bgSecondary,
-              color: theme.textSecondary,
-              border: `1px solid ${theme.border}`,
-              marginTop: 6,
-            }}
-          >
-            {clipboardText || '(nothing to send — give this change a title or a prompt first)'}
-          </div>
-        ) : null}
+      {/* Launch mode's "paste at a shell prompt" caution lives in the New
+          agent button's tooltip — it was two lines of prose for something you
+          learn once. The prompt-only warning stays on screen, because it's
+          about the model silently not being the one you picked. */}
+      {mode === 'prompt-only' ? (
+        <ModelWarning cli={cli} switching={switching} targetModel={targetModel} />
+      ) : null}
 
-        {/* Launch mode's "paste at a shell prompt" caution lives in the New
-            agent button's tooltip — it was two lines of prose for something you
-            learn once. The prompt-only warning stays on screen, because it's
-            about the model silently not being the one you picked. */}
-        {mode === 'prompt-only' ? (
-          <ModelWarning cli={cli} switching={switching} targetModel={targetModel} />
-        ) : null}
-      </div>
+      {branchMismatch ? (
+        <div
+          className="change-warning"
+          style={{
+            background: 'rgba(245, 158, 11, 0.12)',
+            color: 'var(--warning, #f59e0b)',
+            marginTop: 7,
+          }}
+        >
+          This note belongs to <code>{itemBranch}</code> — you&rsquo;re on{' '}
+          <code>{currentBranch}</code>. Without creating a branch, the agent
+          works here.
+        </div>
+      ) : null}
 
       <div>
         <label className="change-check" style={{ color: theme.textPrimary }}>
@@ -242,7 +253,7 @@ function ModelWarning({
         <div style={{ marginTop: 8 }}>
           <button
             className="change-btn"
-            style={{ background: 'transparent', color: theme.accent, border: `1px solid ${theme.border}` }}
+            style={{ background: 'var(--change-btn-bg, transparent)', color: theme.accent, border: `1px solid ${theme.border}` }}
             onClick={() => {
               void copyText(line).then((ok) => setCopied(ok));
             }}
@@ -272,7 +283,9 @@ function ModeButton({
     <button
       className="change-radio"
       style={{
-        background: selected ? 'rgba(127, 127, 127, 0.14)' : 'transparent',
+        background: selected
+          ? 'var(--change-btn-bg, rgba(127, 127, 127, 0.14))'
+          : 'var(--change-btn-bg, transparent)',
         border: `1px solid ${selected ? theme.accent : theme.border}`,
         color: selected ? theme.textPrimary : theme.textSecondary,
         fontWeight: selected ? 600 : 400,

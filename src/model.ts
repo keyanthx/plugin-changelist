@@ -84,6 +84,11 @@ export interface Settings {
   sendMode: SendMode;
   /** Whether the send popover starts with "create a branch" ticked. */
   createBranch: boolean;
+  /**
+   * Whether the expanded change shows the full text that will be copied.
+   * Off by default — the preview is hidden entirely, not collapsible.
+   */
+  showCopiedText: boolean;
   /** Prefix for generated branch names, e.g. `feat/`. May be empty. */
   branchPrefix: string;
   /**
@@ -124,6 +129,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   sendMode: 'launch',
   createBranch: false,
+  showCopiedText: false,
   branchPrefix: '',
   improveCli: 'claude',
   improveModel: 'haiku',
@@ -250,6 +256,7 @@ export function readStored(raw: unknown): Stored {
       },
       sendMode: storedSettings.sendMode === 'prompt-only' ? 'prompt-only' : 'launch',
       createBranch: storedSettings.createBranch === true,
+      showCopiedText: storedSettings.showCopiedText === true,
       branchPrefix: asString(storedSettings.branchPrefix, DEFAULT_SETTINGS.branchPrefix),
       improveCli: storedSettings.improveCli === 'opencode' ? 'opencode' : 'claude',
       improveModel: asString(storedSettings.improveModel, DEFAULT_SETTINGS.improveModel),
@@ -372,6 +379,60 @@ export function groupItems(items: ChangeItem[]) {
     todo: items.filter((item) => item.status === 'todo'),
     done: items.filter((item) => item.status === 'done'),
   };
+}
+
+/**
+ * Should a collapsed row's ▶ open the item instead of sending it?
+ *
+ * True when a send would do something the user hasn't seen: create a branch
+ * (its name must be on screen first) or run on a different branch than the
+ * note belongs to. Both cases open the item, where the send options — and, for
+ * the branch mismatch, the warning — are visible.
+ */
+export function shouldDeferQuickSend(
+  item: Pick<ChangeItem, 'branchAtCapture' | 'workBranch'>,
+  currentBranch: string | null,
+  createBranch: boolean
+): boolean {
+  if (createBranch) return true;
+  return shouldShowBranch(branchForItem(item), currentBranch);
+}
+
+/** Items in flight that carry a work branch worth checking for. */
+export function doingItemsWithBranches(items: ChangeItem[]): ChangeItem[] {
+  return items.filter((item) => item.status === 'doing' && item.workBranch);
+}
+
+/**
+ * The id selection moves to from `selectedId`, or null for nothing selectable.
+ *
+ * Walks only the actionable rows — In progress and To do — in the same order
+ * they're drawn (doing group first, then todo). Done is archived, not
+ * somewhere keyboard navigation should land. Clamps at the ends rather than
+ * wrapping, so the first/last row keeps the key without jumping.
+ */
+export function nextSelectableItem(
+  items: ChangeItem[],
+  selectedId: string | null,
+  direction: -1 | 1
+): string | null {
+  const doing = items.filter((item) => item.status === 'doing');
+  const todo = items.filter((item) => item.status === 'todo');
+  const actionable = [...doing, ...todo];
+  if (actionable.length === 0) return null;
+
+  if (!selectedId) {
+    return direction > 0 ? actionable[0].id : actionable[actionable.length - 1].id;
+  }
+
+  const index = actionable.findIndex((item) => item.id === selectedId);
+  if (index === -1) {
+    return direction > 0 ? actionable[0].id : actionable[actionable.length - 1].id;
+  }
+
+  const next = index + direction;
+  if (next < 0 || next >= actionable.length) return selectedId;
+  return actionable[next].id;
 }
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {

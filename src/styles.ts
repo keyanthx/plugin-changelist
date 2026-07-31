@@ -32,7 +32,8 @@ export const CSS = `
   .change-row-open,
   .change-row-chevron,
   .change-dot,
-  .change-resize-handle {
+  .change-resize-handle,
+  .change-window-resize-handle {
     animation: none !important;
     transition: none !important;
   }
@@ -48,6 +49,11 @@ export const CSS = `
  * open inline on their row.
  */
 .change-frame {
+  /* Every single-line control in the plugin shares this height, so buttons,
+     inputs, selects and radios line up whether they sit beside each other in a
+     row or in different panels of the same form. Text fields (the notes box
+     and multiline template boxes) opt out — they grow to fit their content. */
+  --change-control-height: 32px;
   position: fixed;
   z-index: 9990;
   display: flex;
@@ -109,6 +115,25 @@ export const CSS = `
 }
 .change-frame-pinned:hover .change-resize-handle { opacity: 0.6; }
 .change-resize-handle:hover { opacity: 1 !important; }
+
+/*
+ * Bottom-right corner of the floating window, dragged to resize both
+ * dimensions. Sits above the body so it stays grabbable over scrolled content,
+ * and above the scrollbar so it doesn't share that strip with it.
+ */
+.change-window-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+  z-index: 2;
+}
+.change-frame:hover .change-window-resize-handle { opacity: 0.5; }
+.change-window-resize-handle:hover { opacity: 1 !important; }
 
 .change-frame-body {
   padding: 12px 13px 16px;
@@ -178,7 +203,6 @@ export const CSS = `
 .change-frame .change-tag-head,
 .change-frame .change-tag-box-row,
 .change-frame .change-send-modes,
-.change-frame .change-send-command,
 .change-frame .change-props-row {
   display: flex !important;
   flex-direction: row !important;
@@ -227,6 +251,30 @@ export const CSS = `
   min-width: 0;
 }
 
+/* Single-line inputs share the plugin's control height. The multiline
+   template boxes also carry .change-input, so they're excluded — see
+   .change-field-multiline below, which keeps its own growing height. The
+   auto-growing one-row fields are excluded too: .change-field-grow keeps its
+   own height so it can open up to show text that wraps. */
+.change-input:not(.change-field-multiline):not(.change-field-grow) {
+  height: var(--change-control-height);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* One-row fields that grow to show everything typed in them: start at control
+   height, wrap at the right edge and open up. auto-grow sets the height from
+   scrollHeight, so overflow-y must stay hidden and resize off or they'd fight
+   it. overflow-wrap makes even an unbroken string (a URL, a path) wrap instead
+   of running past the border. */
+.change-field-grow {
+  min-height: var(--change-control-height);
+  resize: none;
+  overflow-y: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
 .change-textarea {
   /* Starts small and grows to fit — see useAutoGrow in editor.tsx. It used to
      reserve 108px whether or not anything was written in it. resize is off
@@ -251,6 +299,12 @@ export const CSS = `
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  /* Same height as the inputs and selects it sits beside. border-box keeps
+     the bordered variants (Discard, No, …) at exactly this height too. */
+  height: var(--change-control-height);
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 .change-btn:disabled { opacity: 0.5; cursor: default; }
 
@@ -267,7 +321,7 @@ export const CSS = `
 .change-frame .change-btn > span { color: inherit; }
 
 .change-icon-btn {
-  background: none;
+  background: var(--change-btn-bg, none);
   border: none;
   cursor: pointer;
   padding: 5px 7px;
@@ -278,6 +332,10 @@ export const CSS = `
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* Icon buttons match the other single-line controls now — they sit beside
+     .change-btn in the editor's action row, so a shorter one read as broken. */
+  height: var(--change-control-height);
+  box-sizing: border-box;
 }
 .change-icon-btn:hover { background: rgba(127, 127, 127, 0.16); }
 .change-icon-btn:disabled { opacity: 0.35; cursor: default; }
@@ -324,7 +382,7 @@ export const CSS = `
 }
 
 .change-fold {
-  background: none;
+  background: var(--change-btn-bg, none);
   border: none;
   padding: 0;
   cursor: pointer;
@@ -346,6 +404,15 @@ export const CSS = `
   animation: changeRowIn 0.16s ease-out;
   transition: opacity 0.14s ease-out, background 0.14s ease-out;
 }
+
+/*
+ * The in-progress row's buttons sit dark on the blue wash rather than letting
+ * the wash show through them. --change-btn-bg flips the value; every control
+ * that is transparent by default reads it with its usual colour as the
+ * fallback, so nothing changes outside a doing row and nothing needs
+ * !important (which would kill hover states).
+ */
+.change-row-doing { --change-btn-bg: var(--bg-secondary); }
 
 .change-row-main {
   display: flex;
@@ -378,6 +445,7 @@ export const CSS = `
   border-radius: 5px;
   transition: background 0.12s ease-out;
 }
+.change-row-open { background: var(--change-btn-bg, none); }
 .change-row-open:hover { background: rgba(127, 127, 127, 0.10); }
 
 /* Content width, shrinking with an ellipsis when there isn't room, so the
@@ -412,13 +480,20 @@ export const CSS = `
 .change-row-title-input {
   flex: 1 1 0;
   min-width: 0;
-  background: none;
+  background: var(--change-btn-bg, none);
   border: 1px solid transparent;
   border-radius: 5px;
   font: inherit;
   font-size: 13px;
   padding: 4px 5px;
   outline: none;
+  /* The one control in the row, so it lines up with the rest. It grows taller
+     once the title wraps, but never shorter than a single row. */
+  min-height: var(--change-control-height);
+  box-sizing: border-box;
+  resize: none;
+  overflow-y: hidden;
+  overflow-wrap: anywhere;
 }
 .change-row-title-input:hover { border-color: rgba(127, 127, 127, 0.3); }
 .change-row-title-input:focus { border-color: rgba(127, 127, 127, 0.55); }
@@ -427,7 +502,7 @@ export const CSS = `
    row's other icon buttons so it stays an easy target. */
 .change-row-collapse {
   flex: none;
-  background: none;
+  background: var(--change-btn-bg, none);
   border: none;
   cursor: pointer;
   font: inherit;
@@ -436,6 +511,9 @@ export const CSS = `
   padding: 6px 7px;
   border-radius: 5px;
   opacity: 0.75;
+  /* Sized like the row's other icon buttons so it stays an easy target. */
+  height: var(--change-control-height);
+  box-sizing: border-box;
 }
 .change-row-collapse:hover { background: rgba(127, 127, 127, 0.16); opacity: 1; }
 
@@ -475,7 +553,7 @@ export const CSS = `
   border-radius: 50%;
   flex: none;
   border: 1.5px solid currentColor;
-  background: none;
+  background: var(--change-btn-bg, none);
   padding: 0;
   cursor: pointer;
   transition: background 0.14s ease-out, transform 0.14s ease-out;
@@ -509,7 +587,9 @@ export const CSS = `
    the three difficulty buttons into something unreadable. */
 .change-props-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .change-props-row .change-difficulty-row { flex: 1 1 145px; }
-.change-tag-select { flex: 1 1 96px; }
+.change-tag-select {
+  flex: 1 1 96px;
+}
 
 /*
  * The template's boxes, in a panel of their own.
@@ -577,6 +657,11 @@ export const CSS = `
   cursor: pointer;
   outline: none;
   box-sizing: border-box;
+  /* One control height for every single-line element — a select beside an
+     input or button must be the same height as them. */
+  height: var(--change-control-height);
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 /* Effort is the narrower of the pair — its values are single short words. */
@@ -641,30 +726,6 @@ export const CSS = `
   text-overflow: ellipsis;
 }
 
-/* The command as one truncated line, the whole thing a click away. */
-.change-send-command {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-.change-send-caret { flex: none; font-size: 9px; }
-.change-send-command-text {
-  flex: 1;
-  min-width: 0;
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .change-send-note { font-size: 11px; line-height: 1.5; margin-top: 6px; overflow-wrap: anywhere; }
 
 .change-code {
@@ -681,6 +742,14 @@ export const CSS = `
 .change-check { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
 
 .change-warning { font-size: 11.5px; padding: 8px 10px; border-radius: 6px; line-height: 1.5; }
+
+.change-warning code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  padding: 0 3px;
+  background: rgba(127, 127, 127, 0.18);
+  border-radius: 4px;
+}
 
 /* Wraps rather than squeezing: two preset buttons don't fit side by side in a
    narrow dock, and stacking them reads far better than compressing both. */
@@ -717,6 +786,18 @@ export const CSS = `
   text-align: left;
   font-family: inherit;
   line-height: 1.45;
+  /* The single-line radios (difficulty, send modes, send-mode setting) share
+     the plugin's control height. The settings' agent-CLI preset buttons are
+     two lines of content, so :has(br) below restores their natural height. */
+  height: var(--change-control-height);
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.change-radio:has(br) {
+  height: auto;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 /* ------------------------------------------------------------- settings */

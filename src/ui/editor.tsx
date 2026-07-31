@@ -10,7 +10,7 @@
  * re-reads storage while the modal is open, so nothing can overwrite what you
  * are typing.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { findAgentCli } from '../agents.ts';
 import { improveWithAgent, type ImprovedPrompt } from '../ai.ts';
 import { useTheme } from '../context.ts';
@@ -30,7 +30,7 @@ import {
   type Template,
 } from '../templates.ts';
 import type { Shell } from '../types.ts';
-import { IconButton, Spinner } from './parts.tsx';
+import { AutoGrowTextarea, IconButton, Spinner, useAutoGrow } from './parts.tsx';
 import { difficultyColor } from './row.tsx';
 import { SendPanel, type SendOptions } from './send-panel.tsx';
 
@@ -45,30 +45,13 @@ const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard'];
  */
 const VISIBLE_FIELDS = 3;
 
-/**
- * Grow a textarea to fit its content instead of scrolling inside itself.
- *
- * The free-text box used to reserve 108px whether or not you wrote anything,
- * which is a lot of empty space in a docked panel. Starting small and growing
- * costs nothing when the box is empty and gives more room than before when the
- * prompt is long.
- */
-function useAutoGrow(ref: React.RefObject<HTMLTextAreaElement | null>, value: string) {
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    // Collapse first, or scrollHeight only ever reports the current height and
-    // the box could grow but never shrink again.
-    element.style.height = 'auto';
-    element.style.height = `${element.scrollHeight}px`;
-  }, [ref, value]);
-}
-
 /** Everything the send section needs that isn't already on the item itself. */
 export interface SendingProps {
   settings: Settings;
   /** Settings prefix, or Ship Studio's own preference when that's empty. */
   branchPrefix: string;
+  /** The branch checked out right now, for the mismatch warning. */
+  currentBranch: string | null;
   hasUncommittedChanges: boolean;
   busy: boolean;
   onSend: (options: SendOptions) => void;
@@ -86,9 +69,11 @@ export function ItemEditor({
   canMoveUp,
   canMoveDown,
   sending,
+  branchGone,
   onChange,
   onMove,
   onDelete,
+  onMarkDone,
 }: {
   item: ChangeItem;
   shell: Shell | null;
@@ -110,9 +95,16 @@ export function ItemEditor({
    * send it, rather than hiding that behind a second control.
    */
   sending: SendingProps;
+  /**
+   * True when this item's work branch no longer exists — the panel detected on
+   * open that it was merged and deleted, so "doing" is probably stale.
+   */
+  branchGone: boolean;
   onChange: (patch: Partial<ChangeItem>) => void;
   onMove: (direction: -1 | 1) => void;
   onDelete: () => void;
+  /** Mark the item done — the action the branch-gone strip offers. */
+  onMarkDone: () => void;
 }) {
   const theme = useTheme();
 
@@ -253,7 +245,9 @@ export function ItemEditor({
                 key={difficulty}
                 className="change-radio"
                 style={{
-                  background: selected ? 'rgba(127, 127, 127, 0.14)' : 'transparent',
+                  background: selected
+                    ? 'var(--change-btn-bg, rgba(127, 127, 127, 0.14))'
+                    : 'var(--change-btn-bg, transparent)',
                   border: `1px solid ${selected ? color : theme.border}`,
                   color: selected ? color : theme.textSecondary,
                   fontWeight: selected ? 600 : 400,
@@ -327,7 +321,6 @@ export function ItemEditor({
               style: boxStyle,
               value: item.fields[field.id] ?? '',
               placeholder: `${field.label} — ${field.placeholder}`,
-              'aria-label': field.label,
               title: field.label,
               spellCheck: false,
               onChange: (event: { target: { value: string } }) =>
@@ -337,10 +330,28 @@ export function ItemEditor({
               <textarea
                 key={field.id}
                 className="change-input change-field-box change-field-multiline"
+                aria-label={field.label}
                 {...shared}
               />
             ) : (
-              <input key={field.id} className="change-input change-field-box" {...shared} />
+              /*
+               * A one-row box that grows once the answer gets long: typed past
+               * the right edge, it wraps and opens up instead of hiding text.
+               * Enter closes the box (Shift+Enter for a line break), so it
+               * still behaves like a single-line field unless you ask for more.
+               */
+              <AutoGrowTextarea
+                key={field.id}
+                className="change-input change-field-box change-field-grow"
+                ariaLabel={field.label}
+                {...shared}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
             );
           })}
 
@@ -458,7 +469,7 @@ export function ItemEditor({
             </button>
             <button
               className="change-btn"
-              style={{ background: 'transparent', color: theme.textMuted, border: `1px solid ${theme.border}` }}
+              style={{ background: 'var(--change-btn-bg, transparent)', color: theme.textMuted, border: `1px solid ${theme.border}` }}
               onClick={() => setSuggestion(null)}
             >
               Discard
@@ -476,10 +487,33 @@ export function ItemEditor({
         item={item}
         settings={sending.settings}
         branchPrefix={sending.branchPrefix}
+        currentBranch={sending.currentBranch}
         hasUncommittedChanges={sending.hasUncommittedChanges}
         busy={sending.busy}
         onSend={sending.onSend}
       />
+
+      {branchGone ? (
+        <div
+          className="change-warning"
+          style={{
+            background: 'rgba(245, 158, 11, 0.12)',
+            color: 'var(--warning, #f59e0b)',
+            marginTop: 8,
+          }}
+        >
+          Branch <code>{item.workBranch}</code> no longer exists — likely merged.
+          <div style={{ marginTop: 6 }}>
+            <button
+              className="change-btn"
+              style={{ background: theme.action, color: theme.actionText }}
+              onClick={onMarkDone}
+            >
+              Mark done
+            </button>
+          </div>
+        </div>
+      ) : null}
 
 
       {/* Footer: the rarely-used controls, kept out of the collapsed row. */}
@@ -487,7 +521,7 @@ export function ItemEditor({
         {improveAvailable ? (
           <button
             className="change-btn"
-            style={{ background: 'transparent', color: theme.accent, border: `1px solid ${theme.border}` }}
+            style={{ background: 'var(--change-btn-bg, transparent)', color: theme.accent, border: `1px solid ${theme.border}` }}
             disabled={improving || (!item.prompt.trim() && !item.title.trim())}
             title={`Rewrite this prompt with ${cli.label}${improveModel ? ` (${improveModel})` : ''}`}
             onClick={() => void improve()}
@@ -521,7 +555,7 @@ export function ItemEditor({
             <button
               className="change-btn"
               style={{
-                background: 'transparent',
+                background: 'var(--change-btn-bg, transparent)',
                 color: theme.textMuted,
                 border: `1px solid ${theme.border}`,
                 padding: '4px 9px',

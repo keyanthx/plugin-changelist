@@ -52,6 +52,23 @@ export async function createOrSwitchBranch(shell: Shell, rawName: string): Promi
 }
 
 /**
+ * Does a branch still exist locally?
+ *
+ * `git branch --list <name>` prints the branch (a current one gets a `* `) or
+ * nothing at all — so a non-empty stdout is the whole test. Used to notice when
+ * an item's work branch has been merged and deleted, so the panel can offer to
+ * mark the item done. Always read-only, and only ever called on open.
+ */
+export async function branchExists(shell: Shell, name: string): Promise<boolean> {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  const result = await shell
+    .exec('git', ['branch', '--list', trimmed], { timeout: 30 })
+    .catch(() => ({ stdout: '', stderr: '', exit_code: 1 }));
+  return result.stdout.trim().length > 0;
+}
+
+/**
  * Ship Studio's own branch-prefix preference, used to pre-fill branch names.
  *
  * Every project-scoped Tauri command takes `projectPath`, and the host rejects

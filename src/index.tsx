@@ -15,15 +15,21 @@ import { AGENT_CLIS } from './agents.ts';
 import { copyText } from './clipboard.ts';
 import { commandExists } from './cli.ts';
 import { usePluginContext, useTheme } from './context.ts';
-import { createOrSwitchBranch, readBranchPrefix } from './git.ts';
+import { branchExists, createOrSwitchBranch, readBranchPrefix } from './git.ts';
+import { itemsToMarkdown } from './markdown.ts';
 import {
+  branchForItem,
   createItem,
+  doingItemsWithBranches,
   emptyStored,
   groupItems,
   moveItem,
+  nextSelectableItem,
   readStored,
   removeItem,
   setStatus,
+  shouldDeferQuickSend,
+  shouldShowBranch,
   updateItem,
   type ChangeItem,
   type Settings,
@@ -42,7 +48,7 @@ import { loadCustomTags, saveCustomTags, toTemplate, isUsable, type CustomTag } 
 import { buildClipboardText } from './send.ts';
 import { injectStyles, removeStyles } from './styles.ts';
 import { ItemEditor } from './ui/editor.tsx';
-import { IconButton, PanelFrame } from './ui/parts.tsx';
+import { AutoGrowTextarea, IconButton, PanelFrame } from './ui/parts.tsx';
 import { ItemRow } from './ui/row.tsx';
 import type { SendOptions } from './ui/send-panel.tsx';
 import { SettingsView } from './ui/settings.tsx';
@@ -77,9 +83,19 @@ function Panel({ onClose }: { onClose: () => void }) {
   const [hydrated, setHydrated] = useState(false);
   const [view, setView] = useState<'list' | 'settings'>('list');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  /** The keyboard-navigable row, if any. Selecting never steals focus. */
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * Items in `doing` whose work branch no longer exists — detected once, on
+   * open, so a merged-and-deleted branch can offer "mark done" instead of
+   * rotting in In progress forever.
+   */
+  const [deadBranchIds, setDeadBranchIds] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
   const [draft, setDraft] = useState('');
+  /** The capture box, so `n` can focus it without stealing anything else. */
+  const captureRef = useRef<HTMLDivElement | null>(null);
   /** Briefly set after a send, purely to flash the row it came from. */
   const [justSentId, setJustSentId] = useState<string | null>(null);
   /** Which agent CLIs are on the PATH, e.g. `{ claude: true, opencode: false }`. */
@@ -138,7 +154,24 @@ function Panel({ onClose }: { onClose: () => void }) {
         restored.settings.improveModel = openCodeCli.defaultImproveModel;
       }
 
+      /**
+       * For every item in flight that has a work branch, ask git whether the
+       * branch is still there. This is the only time it runs — on open, with
+       * the user watching — so "the branch is gone, mark done?" can never
+       * happen by surprise. A merged-and-deleted branch is the signal that
+       * work finished without the item being told.
+       */
+      const gone = new Set<string>();
+      const checks = doingItemsWithBranches(restored.items).map(async (item) => {
+        if (item.workBranch && !(await branchExists(context.shell, item.workBranch))) {
+          gone.add(item.id);
+        }
+      });
+      await Promise.all(checks);
+
+      if (cancelled) return;
       setStored(restored);
+      setDeadBranchIds(gone);
       setDetectedPrefix(prefix);
       setInstalledClis(found);
       setHydrated(true);
@@ -192,6 +225,18 @@ function Panel({ onClose }: { onClose: () => void }) {
 
   const patchSettings = useCallback((patch: Partial<Settings>) => {
     setStored((previous) => ({ ...previous, settings: { ...previous.settings, ...patch } }));
+  }, []);
+
+  /** Copy the whole list as Markdown — a backlog for a PR, an issue, an agent. */
+  const copyListAsMarkdown = useCallback(async () => {
+    const copied = await copyText(itemsToMarkdown(storedRef.current.items));
+    const context = ctxRef.current;
+    context?.actions.showToast(
+      copied
+        ? 'List copied as Markdown'
+        : 'Could not reach the clipboard. Open the list and copy by hand.',
+      copied ? 'success' : 'error'
+    );
   }, []);
 
   const addFromDraft = useCallback(() => {
@@ -279,22 +324,140 @@ function Panel({ onClose }: { onClose: () => void }) {
   );
 
   /**
-   * The ▶ button on a row. Sends straight away, unless a branch would be
-   * created — a git command should never run without you seeing the name it
-   * will use, so that case opens the change instead, where the send options
-   * (branch name included) are on screen.
+   * The ▶ button on a row. Sends straight away, unless sending would do
+   * something the user hasn't seen — create a branch (the name must be on
+   * screen) or run on a different branch than the note belongs to. Both cases
+   * open the change instead, where the send options and the warning are.
    */
   const quickSend = useCallback(
     (item: ChangeItem) => {
       const settings = storedRef.current.settings;
-      if (settings.createBranch) {
+      const currentBranch = ctxRef.current?.project?.currentBranch ?? null;
+      if (shouldDeferQuickSend(item, currentBranch, settings.createBranch)) {
         setExpandedId(item.id);
+        setSelectedId(item.id);
         return;
       }
       void performSend(item, { mode: settings.sendMode, createBranch: false, branchName: '' });
     },
     [performSend]
   );
+
+  /** Move the keyboard selection one row up or down the actionable list. */
+  const moveSelection = useCallback((direction: -1 | 1) => {
+    setSelectedId((current) => nextSelectableItem(storedRef.current.items, current, direction));
+  }, []);
+
+  /** An item that left the actionable rows (done, deleted) stops being selected. */
+  useEffect(() => {
+    if (!selectedId) return;
+    const item = stored.items.find((entry) => entry.id === selectedId);
+    if (!item || item.status === 'done') setSelectedId(null);
+  }, [stored.items, selectedId]);
+
+  /**
+   * The keyboard, when the panel is open and focus isn't in a field.
+   *
+   *   n         focus the capture box
+   *   j / ↓     select the next actionable row
+   *   k / ↑     select the previous one
+   *   Enter     expand / collapse the selected row
+   *   s         send the selected row (through the same gate as ▶)
+   *   d         mark the selected row done
+   *   Escape    collapse the open row, then close the floating window
+   *
+   * Typing anywhere in an input keeps the keys: the capture box already adds
+   * on Enter, the title box commits on Enter, and a Cmd/Ctrl chord is never
+   * hijacked. The one place the panel adds a shortcut of its own is Escape in
+   * Settings, which goes back to the list.
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+
+      if (view === 'settings') {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          setView('list');
+        }
+        return;
+      }
+
+      const findSelected = () =>
+        selectedId ? storedRef.current.items.find((item) => item.id === selectedId) : undefined;
+
+      switch (event.key) {
+        case 'Escape': {
+          event.preventDefault();
+          if (expandedId) setExpandedId(null);
+          // The pinned dock is furniture — Escape never closes it.
+          else if (getDock().mode === 'window') setDock({ open: false });
+          break;
+        }
+        case 'n':
+          event.preventDefault();
+          captureRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+          break;
+        case 'j':
+        case 'ArrowDown':
+          event.preventDefault();
+          moveSelection(1);
+          requestAnimationFrame(() => {
+            document
+              .querySelector<HTMLElement>('.change-row-selected')
+              ?.scrollIntoView({ block: 'nearest' });
+          });
+          break;
+        case 'k':
+        case 'ArrowUp':
+          event.preventDefault();
+          moveSelection(-1);
+          requestAnimationFrame(() => {
+            document
+              .querySelector<HTMLElement>('.change-row-selected')
+              ?.scrollIntoView({ block: 'nearest' });
+          });
+          break;
+        case 'Enter': {
+          const item = findSelected();
+          if (!item || item.status === 'done') break;
+          event.preventDefault();
+          const next = expandedId === item.id ? null : item.id;
+          setExpandedId(next);
+          if (next) {
+            // Opening from the keyboard lands the cursor in the title box,
+            // ready to edit without another keypress.
+            requestAnimationFrame(() => {
+              const titleInput = document.querySelector<HTMLTextAreaElement>(
+                '.change-row-expanded .change-row-title-input'
+              );
+              titleInput?.focus();
+            });
+          }
+          break;
+        }
+        case 's': {
+          const item = findSelected();
+          if (!item || item.status === 'done') break;
+          event.preventDefault();
+          quickSend(item);
+          break;
+        }
+        case 'd': {
+          const item = findSelected();
+          if (!item || item.status === 'done') break;
+          event.preventDefault();
+          toggleDone(item);
+          break;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [expandedId, moveSelection, quickSend, selectedId, toggleDone, view]);
 
   // -------------------------------------------------------------- rendering
 
@@ -329,6 +492,7 @@ function Panel({ onClose }: { onClose: () => void }) {
   const sendingFor = (item: ChangeItem) => ({
     settings: stored.settings,
     branchPrefix: effectivePrefix,
+    currentBranch: ctx.project?.currentBranch ?? null,
     hasUncommittedChanges: ctx.project?.hasUncommittedChanges ?? false,
     busy: sending,
     onSend: (options: SendOptions) => void performSend(item, options),
@@ -346,17 +510,23 @@ function Panel({ onClose }: { onClose: () => void }) {
             key={item.id}
             className={`change-row${expandedId === item.id ? ' change-row-expanded' : ''}${
               justSentId === item.id ? ' change-row-sent' : ''
+            }${item.status === 'doing' ? ' change-row-doing' : ''}${
+              selectedId === item.id ? ' change-row-selected' : ''
             }`}
             style={{
-              background: theme.bgSecondary,
+              // The item in flight gets a faint blue fill — colour-mix tints the
+              // row's own background with the accent, so it follows the theme
+              // and stays subtle instead of a saturated bar on the left edge.
+              background:
+                item.status === 'doing'
+                  ? `color-mix(in srgb, ${theme.accent} 10%, ${theme.bgSecondary})`
+                  : theme.bgSecondary,
               border: `1px solid ${expandedId === item.id ? theme.accent : theme.border}`,
-              // An accent edge on the item currently in flight, so the eye lands
-              // on what you're working on. Inset shadow rather than a border so
-              // it doesn't fight the border above.
-              ...(item.status === 'doing'
-                ? { boxShadow: `inset 3px 0 0 ${theme.accent}` }
-                : null),
+              // The selection bar reads as "this one is selected" without
+              // fighting the accent border that marks the expanded row.
+              boxShadow: selectedId === item.id ? `inset 3px 0 0 0 ${theme.accent}` : undefined,
             }}
+            onClick={() => setSelectedId(item.id)}
           >
             <ItemRow
               item={item}
@@ -380,12 +550,14 @@ function Panel({ onClose }: { onClose: () => void }) {
                 canMoveUp={index > 0}
                 canMoveDown={index < items.length - 1}
                 sending={sendingFor(item)}
+                branchGone={deadBranchIds.has(item.id)}
                 onChange={(patch) => patchItem(item.id, patch)}
                 onMove={(direction) => setItems((current) => moveItem(current, item.id, direction))}
                 onDelete={() => {
                   setItems((current) => removeItem(current, item.id));
                   setExpandedId(null);
                 }}
+                onMarkDone={() => toggleDone(item)}
               />
             ) : null}
           </div>
@@ -429,9 +601,17 @@ function Panel({ onClose }: { onClose: () => void }) {
               ← Back
             </IconButton>
           ) : (
-            <IconButton label="Settings" onClick={() => setView('settings')}>
-              ⚙
-            </IconButton>
+            <>
+              <IconButton label="Copy the list as Markdown" onClick={() => void copyListAsMarkdown()}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="9" y="9" width="11" height="11" rx="1.5" />
+                  <path d="M5 15V5a1.5 1.5 0 0 1 1.5-1.5H15" strokeLinecap="round" />
+                </svg>
+              </IconButton>
+              <IconButton label="Settings" onClick={() => setView('settings')}>
+                ⚙
+              </IconButton>
+            </>
           )
         }
       >
@@ -447,9 +627,9 @@ function Panel({ onClose }: { onClose: () => void }) {
           />
         ) : (
         <>
-        <div className="change-capture">
-          <input
-            className="change-input"
+        <div className="change-capture" ref={captureRef}>
+          <AutoGrowTextarea
+            className="change-input change-field-grow"
             style={{
               background: theme.bgSecondary,
               color: theme.textPrimary,
@@ -460,7 +640,12 @@ function Panel({ onClose }: { onClose: () => void }) {
             spellCheck={false}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') addFromDraft();
+              // Enter adds the change, as with the old single-line box.
+              // Shift+Enter inserts a line break instead.
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                addFromDraft();
+              }
             }}
           />
           <button
